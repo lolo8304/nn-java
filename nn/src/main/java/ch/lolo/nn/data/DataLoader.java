@@ -3,7 +3,6 @@ package ch.lolo.nn.data;
 import ch.lolo.nn.NN;
 import ch.lolo.tensor.Tensor;
 
-import java.util.Arrays;
 import java.util.Iterator;
 import java.util.NoSuchElementException;
 
@@ -52,16 +51,13 @@ public final class DataLoader implements Iterable<Batch> {
                 for (int i = 0; i < n; i++) samples[i] = ds.get(order[pos + i]);
                 Sample first = samples[0];
                 int[] xs = prepend(n, first.input().shape()), ys = prepend(n, first.target().shape());
-                Tensor x = Tensor.generate(idx -> {
-                    int row = idx[0];
-                    int[] inner = Arrays.copyOfRange(idx, 1, idx.length);
-                    return samples[row].input().get(inner);
-                }, xs);
-                Tensor y = Tensor.generate(idx -> {
-                    int row = idx[0];
-                    int[] inner = Arrays.copyOfRange(idx, 1, idx.length);
-                    return samples[row].target().get(inner);
-                }, ys);
+                Tensor x = Tensor.zeros(xs), y = Tensor.zeros(ys);
+                // Fetch all samples before copying: datasets may transform samples on get().
+                // copyInto checks exact shapes and handles both contiguous and strided views.
+                for (int row = 0; row < n; row++) {
+                    samples[row].input().copyInto(x.slice(0, row));
+                    samples[row].target().copyInto(y.slice(0, row));
+                }
                 pos += n;
                 return new Batch(x, y);
             }

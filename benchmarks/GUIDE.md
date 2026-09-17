@@ -52,6 +52,11 @@ and `tensor.backend` property themselves.
 ./gradlew :benchmarks:training -PtensorBackend=java
 ```
 
+`trainingEpoch` measures a complete training epoch; `loadingEpoch` assembles every
+shuffled batch and consumes it through a JMH Blackhole, without training. Both
+use the same dataset setup. Filter with `.*TrainingBenchmarks.trainingEpoch` or
+`.*TrainingBenchmarks.loadingEpoch` to run only one.
+
 Each measured operation is a complete epoch over 1,024 synthetic samples with a
 batch size of 32. The default feature sweep is 128 and 784. A seeded teacher creates
 fixed regression targets outside the timed epoch; the trainable model is

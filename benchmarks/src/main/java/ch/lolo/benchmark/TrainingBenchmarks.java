@@ -1,5 +1,7 @@
 package ch.lolo.benchmark;
 
+import ch.lolo.nn.data.DataLoader;
+import org.openjdk.jmh.infra.Blackhole;
 import org.openjdk.jmh.annotations.*;
 import java.util.concurrent.TimeUnit;
 
@@ -14,6 +16,12 @@ public class TrainingBenchmarks {
 
     @Setup(Level.Iteration) public void setup() {
         workload = new TrainingWorkload(samples, features, batch, 42);
+    }
+
+    /** Assemble and consume every batch, including the epoch shuffle. */
+    @Benchmark public void loadingEpoch(Blackhole sink) {
+        for (var batch : new DataLoader(workload.dataset, workload.batchSize, true))
+            sink.consume(batch);
     }
 
     @Benchmark public double trainingEpoch() {
