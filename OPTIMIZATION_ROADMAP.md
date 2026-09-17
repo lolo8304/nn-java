@@ -10,6 +10,10 @@ backends, and recorded measurements. Nothing is currently In progress.
 
 ## Evidence behind the order
 
+See the [consolidated performance and allocation summary](benchmarks/OPTIMIZATION_SUMMARY.md)
+for pre-roadmap optimizations, every completed item, and current Java versus Vector
+measurements through OPT-09. The figures below preserve the original prioritization baseline.
+
 Source: [measured results](benchmarks/OUTPUT_BUFFER_RESULTS.md) and
 [benchmark/profiling guide](benchmarks/GUIDE.md).
 

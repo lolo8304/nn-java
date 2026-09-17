@@ -1,7 +1,8 @@
 # Local kernel comparison
 
-See [reusable output buffer results](OUTPUT_BUFFER_RESULTS.md) for the latest
-forked JMH measurements.
+See the [consolidated optimization summary](OPTIMIZATION_SUMMARY.md) for all
+completed changes, percentage gains, and current Java versus Vector JMH measurements.
+The [reusable output buffer results](OUTPUT_BUFFER_RESULTS.md) record OPT-01/02.
 
 For the new forked JMH benchmarks and training phase profiler, see the
 [benchmark guide](GUIDE.md). The tables below are historical smoke-harness results

@@ -215,6 +215,10 @@ V1 intentionally supports sequential networks only. It has a real reverse-mode a
 
 ## Performance and Java 26
 
+See the [consolidated performance and allocation summary](benchmarks/OPTIMIZATION_SUMMARY.md)
+for pre-roadmap changes, OPT-01 through OPT-09, percentage gains, and fresh Java
+versus Vector full-epoch measurements.
+
 See the [optimization roadmap](OPTIMIZATION_ROADMAP.md) for prioritized future
 tensor and neural-network work, dependencies, and validation criteria.
 
@@ -243,9 +247,8 @@ compilation, tests, and all example/benchmark run tasks, even when the shell's
 `java` command points to an older JDK. The benchmark uses a 256–512 MiB heap.
 
 The JMH tasks use two forks, time-based warmup, repeated measurements, and GC profiling.
-Historical smoke-harness results are not directly comparable to these measurements. See [latest Java/Vector benchmark results](benchmarks/README.md#current-java-26-backend-measurements)
-for timings, allocation counts, the user-reported comparison, and the subsequent
-default-Vector verification run.
+Historical smoke-harness results are not directly comparable to these measurements. See [historical Java/Vector smoke results](benchmarks/README.md#current-java-26-backend-measurements)
+for the early user-reported comparison and default-Vector verification run.
 
 ### Reusable tensor output buffers
 
