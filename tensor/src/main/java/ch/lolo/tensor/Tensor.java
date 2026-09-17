@@ -561,6 +561,62 @@ public final class Tensor {
         return destination;
     }
 
+    /**
+     * Writes upstream * ReLU'(this input) into destination, or adds it when accumulate is true.
+     * Shapes must match exactly. Shared views have snapshot semantics; differently mapped
+     * overlapping inputs may require copies. ReLU's derivative at either signed zero is zero.
+     */
+    public Tensor reluBackwardInto(Tensor upstream, Tensor destination, boolean accumulate) {
+        return activationBackwardInto(upstream, destination, accumulate, ActivationDerivative.RELU, 0);
+    }
+
+    /** Like reluBackwardInto, but uses derivative one at zero and alpha for negative inputs. */
+    public Tensor leakyReluBackwardInto(Tensor upstream, Tensor destination, boolean accumulate, double alpha) {
+        return activationBackwardInto(upstream, destination, accumulate, ActivationDerivative.LEAKY_RELU, alpha);
+    }
+
+    /** Like reluBackwardInto, but this tensor is the saved sigmoid OUTPUT, not its input. */
+    public Tensor sigmoidBackwardInto(Tensor upstream, Tensor destination, boolean accumulate) {
+        return activationBackwardInto(upstream, destination, accumulate, ActivationDerivative.SIGMOID, 0);
+    }
+
+    /** Like reluBackwardInto, but this tensor is the saved tanh OUTPUT, not its input. */
+    public Tensor tanhBackwardInto(Tensor upstream, Tensor destination, boolean accumulate) {
+        return activationBackwardInto(upstream, destination, accumulate, ActivationDerivative.TANH, 0);
+    }
+
+    private enum ActivationDerivative {
+        RELU, LEAKY_RELU, SIGMOID, TANH;
+
+        double at(double x, double alpha) {
+            return switch (this) {
+                case RELU -> x > 0 ? 1 : 0;
+                case LEAKY_RELU -> x >= 0 ? 1 : alpha;
+                case SIGMOID -> x * (1 - x);
+                case TANH -> 1 - x * x;
+            };
+        }
+    }
+
+    private Tensor activationBackwardInto(Tensor upstream, Tensor destination, boolean accumulate,
+                                          ActivationDerivative derivative, double alpha) {
+        requireShape(upstream, shape);
+        requireShape(destination, shape);
+        Tensor saved = safeInput(destination), g = upstream.safeInput(destination);
+        int length = (int) size();
+        boolean contiguous = saved.isContiguous() && g.isContiguous() && destination.isContiguous();
+        int[] index = contiguous ? null : new int[rank()];
+        for (int i = 0; i < length; i++) {
+            int si = contiguous ? saved.offset + i : saved.broadcastAddress(index);
+            int gi = contiguous ? g.offset + i : g.broadcastAddress(index);
+            int di = contiguous ? destination.offset + i : destination.broadcastAddress(index);
+            double contribution = g.data[gi] * derivative.at(saved.data[si], alpha);
+            destination.data[di] = accumulate ? destination.data[di] + contribution : contribution;
+            if (!contiguous) advance(index, shape);
+        }
+        return destination;
+    }
+
     public Tensor sigmoid() {
         return map(v -> 1 / (1 + Math.exp(-v)));
     }

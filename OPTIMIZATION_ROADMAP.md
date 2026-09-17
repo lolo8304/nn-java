@@ -44,14 +44,19 @@ OPT-04 then reduces it to about 13.9 MB; see the [bulk batch measurements](bench
 | 6 · OPT-06 | Done | Tensor | Vector matmul with transposed right operand | Use fresh 64-column panels for larger transposed/strided-right products, preserving summation order. Small products retain the scalar path; no packed weights are cached. | Implemented in [VectorKernels](tensor/src/main/java/ch/lolo/tensor/VectorKernels.java). Offset/stride/tail, exact arithmetic, updated-weight and input-gradient tests pass on both backends. [Packing, kernel and epoch measurements](benchmarks/TRANSPOSED_MATMUL_RESULTS.md). |
 | 7 · OPT-07 | Done | Tensor | Cache-blocked matrix multiplication | Tile larger rank-2 products on both backends; retain small-product kernels. Bound fresh strided-right scratch to 32 KiB. | Implemented in [MatmulKernels](tensor/src/main/java/ch/lolo/tensor/MatmulKernels.java). Ordered arithmetic, tile boundaries, both transpose directions, views, mutations and large gradients verified on both backends. [Kernel and epoch measurements](benchmarks/BLOCKED_MATMUL_RESULTS.md). |
 | 8 · OPT-08 | Done | NN loss | Stable fused cross entropy | Use log-sum-exp directly from logits and a dedicated backward calculation to avoid the softmax/smoothing/log/multiply graph. | Implemented in [Variable.crossEntropy](nn/src/main/java/ch/lolo/nn/autograd/Variable.java). Unsmoothed objective and checkpoint migration documented; weighted targets, extreme logits, finite differences, views, graph lifetime, convergence and persistence tested on both backends. [Separate classification measurements](benchmarks/FUSED_CROSS_ENTROPY_RESULTS.md). |
-| 9 · OPT-09 | Planned | NN gradients | Fuse activation backward kernels | Compute ReLU/LeakyReLU, sigmoid and tanh derivatives directly into gradient destinations instead of allocating masks and intermediate tensors. | Finite differences, zero/saturation behavior, strided views and allocation measurements. Retain activations still needed by other graph branches. |
+| 9 · OPT-09 | Done | NN gradients | Fuse activation backward kernels | Compute ReLU/LeakyReLU, sigmoid and tanh derivatives directly into gradient destinations instead of allocating masks and intermediate tensors. | Implemented direct gradient writes and accumulation for all four activations. Finite differences, zero/saturation behavior, views, aliases and shared graph lifetimes verified on both backends. [Allocation measurements](benchmarks/FUSED_ACTIVATION_RESULTS.md). |
 | 10 · OPT-10 | Planned | NN gradients | Reuse gradient storage | Accumulate into owned gradient buffers instead of copying the first contribution and reallocating on subsequent contributions. Reuse storage across resets where safe. | Shared graphs, repeated backward, leaf accumulation, seed non-aliasing and zero-gradient semantics remain correct. Measure backward allocation and full epochs. |
 | 11 · OPT-11 | Planned | Tensor | Extend optimized kernel coverage | Add specialized reductions, common broadcast layouts, batched matmul dispatch and unary operations where profiling justifies them. Split work into the subitems below. | Benchmark each addition on both backends; retain Java fallbacks. Test floating-point edge cases and document changes in reduction order. |
 | 12 · OPT-12 | Planned | NN data | Optimize augmentation and prefetch | Profile real image transformations, improve hot resampling loops, and add bounded prefetch only if preparation limits training throughput. | Requires real-data profiling in OPT-15. Preserve training-only transforms, labels, deterministic RNG policy and validation/test isolation. |
 | 13 · OPT-13 | Deferred | Tensor | Parallel large matrix multiplication | Distribute independent output tiles across a bounded CPU worker pool once serial kernels are tuned. | Size thresholds, no nested oversubscription, controlled interaction with data loading, and latency/throughput measurements on larger models. |
 | 14 · OPT-14 | Deferred | Tensor architecture | Float32 and native BLAS evaluation | Evaluate these as separate backend/data-type projects after simpler optimizations. Float32 reduces element storage; native BLAS may help sufficiently large products. | Measure conversion/copy/native-call overhead; define precision, convergence, packaging, memory lifetime and checkpoint compatibility. Preserve portable Java/Vector paths. |
 
-**Start next with OPT-09.** OPT-08 is complete; see [fused cross-entropy results](benchmarks/FUSED_CROSS_ENTROPY_RESULTS.md).
+**Start next with OPT-10.** OPT-09 is complete; see [fused activation results](benchmarks/FUSED_ACTIVATION_RESULTS.md).
+First-contribution allocation drops by 80–83% in the 4,096-element backward
+benchmark; contributions to an existing gradient allocate approximately zero bytes.
+Saved activations remain intact for other graph branches.
+
+OPT-08 is complete; see [fused cross-entropy results](benchmarks/FUSED_CROSS_ENTROPY_RESULTS.md).
 Loss forward/backward is about 2.3× faster with 68% less allocation on both backends.
 Classification epochs save about 1.14 MB; the 128-feature Vector epoch improves by
 3.6%, while other epoch timing intervals overlap. The MSE baseline is unchanged.
@@ -80,7 +85,7 @@ For the 128-feature workload, loader allocation fell from 8.228 to 1.636 MB/epoc
 Vector full epochs improved from 6.006 to 4.288 ms and Java from 7.250 to 5.630 ms.
 After OPT-04, full-epoch allocation was about 13.9 MB. Its instrumented Vector profile
 puts loading at 5–8% of epoch time and backward at 52–60%, with about 10.3 MB
-allocated in backward after warmup. OPT-09/10 remain promising training follow-ups;
+allocated in backward after warmup. OPT-10 remains a promising training follow-up;
 OPT-08 onward is provisional until broader real-data profiles support the order.
 
 ## Detailed follow-up backlog

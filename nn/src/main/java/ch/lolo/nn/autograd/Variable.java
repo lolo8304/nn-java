@@ -70,6 +70,12 @@ public class Variable {
         if (requiresGrad) grad = grad == null ? g.copy() : grad.add(g);
     }
 
+    // Gradients own their storage: never reuse saved activations or incoming adjoints.
+    private Tensor activationGrad() {
+        if (grad == null) grad = Tensor.zeros(value.shape());
+        return grad;
+    }
+
     public Variable add(Variable b) {
         Variable a = this;
         Tensor out = value.add(b.value);
@@ -174,28 +180,40 @@ public class Variable {
         Variable a = this;
         Tensor y = value.relu();
         if (!recordsGrad()) return of(y);
-        return node(y, List.of(a), g -> a.addGrad(g.multiply(Tensor.generate(i -> a.value.get(i) > 0 ? 1 : 0, a.value.shape()))));
+        return node(y, List.of(a), g -> {
+            boolean accumulate = a.grad != null;
+            a.value.reluBackwardInto(g, a.activationGrad(), accumulate);
+        });
     }
 
     public Variable sigmoid() {
         Variable a = this;
         Tensor y = value.sigmoid();
         if (!recordsGrad()) return of(y);
-        return node(y, List.of(a), g -> a.addGrad(g.multiply(y.multiply(Tensor.ones(y.shape()).subtract(y)))));
+        return node(y, List.of(a), g -> {
+            boolean accumulate = a.grad != null;
+            y.sigmoidBackwardInto(g, a.activationGrad(), accumulate);
+        });
     }
 
     public Variable tanh() {
         Variable a = this;
         Tensor y = TensorOps.map(value, Math::tanh);
         if (!recordsGrad()) return of(y);
-        return node(y, List.of(a), g -> a.addGrad(g.multiply(Tensor.ones(y.shape()).subtract(y.pow(2)))));
+        return node(y, List.of(a), g -> {
+            boolean accumulate = a.grad != null;
+            y.tanhBackwardInto(g, a.activationGrad(), accumulate);
+        });
     }
 
     public Variable leakyRelu(double alpha) {
         Variable a = this;
         Tensor y = TensorOps.map(value, x -> x >= 0 ? x : alpha * x);
         if (!recordsGrad()) return of(y);
-        return node(y, List.of(a), g -> a.addGrad(g.multiply(Tensor.generate(i -> a.value.get(i) >= 0 ? 1 : alpha, a.value.shape()))));
+        return node(y, List.of(a), g -> {
+            boolean accumulate = a.grad != null;
+            a.value.leakyReluBackwardInto(g, a.activationGrad(), accumulate, alpha);
+        });
     }
 
     public Variable reshape(int... s) {
