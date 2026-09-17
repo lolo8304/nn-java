@@ -40,3 +40,22 @@ Run the commands in the root README to reproduce the updated measurements.
 To compare another revision, compile its `tensor/src/main/java` and `nn/src/main/java`
 sources into a separate class directory with `javac`, compile this same harness against
 that directory, and run it with the same JVM flags. Do not mix baseline and updated classes.
+
+## Java 26 upgrade run
+
+OpenJDK 26.0.2 (arm64), same machine, inputs, warmup/measurement counts, and
+256–512 MiB heap. Run with `./gradlew :examples:runKernelBenchmark`; Gradle
+selects the Java 26 toolchain for compilation and execution.
+
+```text
+elementwise            0.078 ms/op        98808 bytes/op
+copy                   0.002 ms/op        32912 bytes/op
+axis sum               0.007 ms/op         4344 bytes/op
+softmax backward       0.078 ms/op       134992 bytes/op
+dense backward         0.143 ms/op       282280 bytes/op
+```
+
+This is a single exploratory run after the upgrade, not a controlled JVM comparison.
+The earlier Java 25 results used a different JDK distribution and were recorded
+at a different time. Do not attribute the entire timing difference to Java 26;
+allocation counts are unchanged.

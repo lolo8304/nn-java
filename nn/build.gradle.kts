@@ -3,10 +3,6 @@ plugins {
 }
 
 java {
-    toolchain {
-        languageVersion = JavaLanguageVersion.of(25)
-    }
-
     withSourcesJar()
     withJavadocJar()
 }

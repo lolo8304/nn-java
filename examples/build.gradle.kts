@@ -2,12 +2,6 @@ plugins {
     application
 }
 
-java {
-    toolchain {
-        languageVersion = JavaLanguageVersion.of(25)
-    }
-}
-
 dependencies {
     implementation(project(":nn"))
     testImplementation(platform("org.junit:junit-bom:5.13.4"))
@@ -36,4 +30,18 @@ tasks.register<JavaExec>("runMnist") {
     classpath = sourceSets.main.get().runtimeClasspath
     mainClass.set("ch.lolo.examples.MnistExample")
     workingDir(rootProject.projectDir)
+}
+
+// Custom run tasks must use the project toolchain, not the Gradle daemon JVM.
+tasks.withType<JavaExec>().configureEach {
+    javaLauncher.set(javaToolchains.launcherFor(java.toolchain))
+}
+
+tasks.register<JavaExec>("runKernelBenchmark") {
+    group = "application"
+    description = "Runs the local kernel timing and allocation benchmark"
+    classpath = sourceSets.main.get().runtimeClasspath
+    mainClass.set("ch.lolo.benchmark.KernelBenchmark")
+    minHeapSize = "256m"
+    maxHeapSize = "512m"
 }

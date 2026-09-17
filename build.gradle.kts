@@ -6,7 +6,7 @@ allprojects {
 subprojects {
     plugins.withType<JavaPlugin> {
         extensions.configure<JavaPluginExtension> {
-            toolchain { languageVersion.set(JavaLanguageVersion.of(25)) }
+            toolchain { languageVersion.set(JavaLanguageVersion.of(26)) }
         }
     }
 }

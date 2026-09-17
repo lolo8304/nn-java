@@ -8,7 +8,7 @@ A small, educational neural-network framework written in pure Java on top of the
 - `nn` — reverse-mode autograd, sequential layers, losses, optimizers, datasets/loaders, metrics and model persistence.
 - `examples` — XOR, regression, classification and MNIST examples.
 
-The Gradle build targets **Java 25** in every module. No preview features or incubator modules are required.
+The Gradle build targets **Java 26** in every module. No preview features or incubator modules are required.
 
 ## Quick start
 
@@ -173,7 +173,7 @@ With a local Gradle installation you can generate the standard wrapper once with
 
 V1 intentionally supports sequential networks only. It has a real reverse-mode autograd engine, but does not attempt arbitrary graph-model composition, convolutions, recurrent layers, GPU execution, mixed precision or parallel training.
 
-## Performance and Java 25
+## Performance and Java 26
 
 Contiguous elementwise operations, copies and array exports use direct array loops;
 broadcasting computes addresses without allocating an index array per element.
@@ -182,26 +182,25 @@ Softmax backward uses `y * (g - sum(g * y))`, linear in the number of classes.
 Backpropagation skips derivatives for constant operands, and optimizers allocate
 initial moment/velocity tensors only when first needed.
 
-Run the local timing/allocation comparison harness on Java 25:
+Run the local timing/allocation comparison harness on Java 26:
 
 ```bash
-./gradlew :nn:classes
-mkdir -p build/benchmarks
-javac -cp tensor/build/classes/java/main:nn/build/classes/java/main \
-  -d build/benchmarks examples/src/main/java/ch/lolo/benchmark/KernelBenchmark.java
-java -Xms256m -Xmx512m \
-  -cp build/benchmarks:tensor/build/classes/java/main:nn/build/classes/java/main ch.lolo.benchmark.KernelBenchmark
+./gradlew :examples:runKernelBenchmark
 ```
+
+Install JDK 26 before building. The shared Gradle toolchain selects Java 26 for
+compilation, tests, and all example/benchmark run tasks, even when the shell's
+`java` command points to an older JDK. The benchmark uses a 256–512 MiB heap.
 
 This short harness is for local comparisons; use JMH with multiple forks for reliable
 performance decisions. See [benchmark notes](benchmarks/README.md) for the measured comparison.
 
-Java 25's [Vector API](https://docs.oracle.com/en/java/javase/25/docs/api/jdk.incubator.vector/jdk/incubator/vector/package-summary.html)
+Java 26's [Vector API](https://docs.oracle.com/en/java/javase/26/docs/api/jdk.incubator.vector/jdk/incubator/vector/package-summary.html)
 is an optional next step for explicit SIMD kernels. It remains an incubator module
 and requires `--add-modules jdk.incubator.vector` at compile time and runtime.
 The current implementation keeps ordinary Java loops and requires no extra flags.
 For much larger matrix workloads, a native BLAS backend through the
-[Foreign Function & Memory API](https://docs.oracle.com/en/java/javase/25/docs/api/java.base/java/lang/foreign/package-summary.html)
+[Foreign Function & Memory API](https://docs.oracle.com/en/java/javase/26/docs/api/java.base/java/lang/foreign/package-summary.html)
 is another option, at the cost of a native dependency and data-transfer/lifetime management.
 Neither backend is implemented here; measure representative training before choosing one.
 
