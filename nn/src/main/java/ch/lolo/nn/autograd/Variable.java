@@ -243,6 +243,50 @@ public class Variable {
         });
     }
 
+    /**
+     * Fused, unsmoothed cross entropy over the last axis. Targets are finite,
+     * nonnegative weights of exactly the same shape; they need not sum to one.
+     * Sums all positions and divides by the first dimension (or one for a vector).
+     */
+    public Variable crossEntropy(Tensor target) {
+        int[] shape = value.shape();
+        if (shape.length == 0 || value.size() == 0 || !Arrays.equals(shape, target.shape()))
+            throw new IllegalArgumentException("cross entropy requires matching nonempty nonscalar shapes");
+        int classes = shape[shape.length - 1];
+        int batch = shape.length > 1 ? shape[0] : 1;
+        double[] logits = value.toArray();
+        double[] weights = target.toArray();
+        boolean record = recordsGrad();
+        double[] derivative = record ? new double[logits.length] : null;
+        double loss = 0;
+        for (int row = 0; row < logits.length; row += classes) {
+            double max = Double.NEGATIVE_INFINITY;
+            double mass = 0;
+            for (int j = row; j < row + classes; j++) {
+                if (!Double.isFinite(logits[j]) || !Double.isFinite(weights[j]) || weights[j] < 0)
+                    throw new IllegalArgumentException("cross entropy requires finite logits and finite nonnegative targets");
+                max = Math.max(max, logits[j]);
+                mass += weights[j];
+            }
+            if (!Double.isFinite(mass))
+                throw new IllegalArgumentException("cross entropy target sum must be finite");
+            double sum = 0;
+            for (int j = row; j < row + classes; j++) sum += Math.exp(logits[j] - max);
+            double logSum = Math.log(sum);
+            for (int j = row; j < row + classes; j++) {
+                // Keep the log-sum-exp shifted: adding max first loses small losses
+                // for large common offsets. Skip zero weights to avoid 0 * infinity.
+                if (weights[j] != 0) loss += (weights[j] / batch) * (logSum + (max - logits[j]));
+                if (record) derivative[j] = (Math.exp(logits[j] - max) / sum * mass - weights[j]) / batch;
+            }
+        }
+        Tensor out = Tensor.scalar(loss);
+        if (!record) return of(out);
+        // Snapshot the adjoint so later target/logit mutation cannot change backward.
+        Tensor dx = Tensor.of(derivative).reshape(shape);
+        return node(out, List.of(this), g -> addGrad(dx.multiply(g.scalar())));
+    }
+
     public void backward() {
         if (!value.isScalar()) throw new IllegalStateException("backward() requires scalar output");
         backward(Tensor.scalar(1));

@@ -15,14 +15,28 @@ final class TrainingWorkload {
     final Sequential model;
     final List<Parameter> parameters;
     final Optimizer optimizer;
-    final Loss loss = new MSELoss();
+    final Loss loss;
     final int batchSize;
 
     TrainingWorkload(int samples, int features, int batchSize, long seed) {
+        this(samples, features, batchSize, seed, new MSELoss(), false);
+    }
+
+    TrainingWorkload(int samples, int features, int batchSize, long seed, Loss loss, boolean classification) {
+        this.loss = loss;
         this.batchSize = batchSize;
         Tensor x = Tensor.random(seed, -1.0, 1.0, samples, features);
         Tensor teacher = Tensor.random(seed + 1, -.1, .1, features, 10);
         Tensor y = x.matmul(teacher).sigmoid();
+        if (classification) {
+            Tensor labels = Tensor.zeros(samples, 10);
+            for (int i = 0; i < samples; i++) {
+                int best = 0;
+                for (int j = 1; j < 10; j++) if (y.get(i, j) > y.get(i, best)) best = j;
+                labels.set(1, i, best);
+            }
+            y = labels;
+        }
         dataset = new TensorDataset(x, y);
         NN.seed(seed);
         optimizer = new Adam(.001);

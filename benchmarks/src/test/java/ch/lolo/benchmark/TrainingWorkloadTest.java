@@ -16,4 +16,16 @@ class TrainingWorkloadTest {
         assertEquals(loss, repeated.epoch());
         assertArrayEquals(trained, repeated.parameters.getFirst().value().toArray());
     }
+    @Test void classificationReferenceAndFusedPerformEquivalentUpdates() {
+        var fused = new TrainingWorkload(65, 17, 32, 42, new ch.lolo.nn.loss.CrossEntropyLoss(), true);
+        double[] initial = fused.parameters.getFirst().value().toArray();
+        double actual = fused.epoch();
+        assertTrue(Double.isFinite(actual));
+        assertFalse(java.util.Arrays.equals(initial, fused.parameters.getFirst().value().toArray()));
+        assertEquals(3, ((ch.lolo.nn.optim.Adam) fused.optimizer).stepCount());
+        var legacy = new TrainingWorkload(65, 17, 32, 42, new ClassificationBenchmarks.LegacyLoss(), true);
+        assertEquals(legacy.epoch(), actual, 1e-9);
+        for (int i = 0; i < fused.parameters.size(); i++)
+            assertArrayEquals(legacy.parameters.get(i).value().toArray(), fused.parameters.get(i).value().toArray(), 1e-9);
+    }
 }

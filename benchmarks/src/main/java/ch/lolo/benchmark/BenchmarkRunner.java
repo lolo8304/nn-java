@@ -18,6 +18,7 @@ public final class BenchmarkRunner {
         var options = new OptionsBuilder().parent(cli);
         if (cli.getIncludes().isEmpty())
             options.include(switch (kind) {
+                case "classification" -> ".*ClassificationBenchmarks.*";
                 case "training" -> ".*TrainingBenchmarks.*";
                 case "inference" -> ".*InferenceBenchmarks.*";
                 default -> ".*KernelBenchmarks.*";

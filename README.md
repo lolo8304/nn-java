@@ -72,7 +72,29 @@ and existing recorded graphs can still be differentiated inside a no-grad scope.
 
 ## Losses
 
-`MSELoss`, `BinaryCrossEntropyLoss`, `CrossEntropyLoss`. Cross entropy expects one-hot targets and logits; it applies softmax internally.
+`MSELoss`, `BinaryCrossEntropyLoss`, `CrossEntropyLoss`. Cross entropy takes finite
+logits (no final Softmax layer) and same-shaped finite, nonnegative targets. One-hot
+and soft-label distributions are supported. Targets are **not normalized**: a row
+with total weight `s` has gradient `s * softmax(logits) - target`. Zero-weight rows
+contribute zero. Shapes must be nonempty and have at least one axis; broadcasting
+is rejected. Classes occupy the last axis. The loss sums all positions and divides
+by the first dimension for rank ≥ 2, or by one for a vector; higher-rank inputs
+therefore retain the existing per-batch, not per-position, reduction.
+
+Cross entropy now uses shifted log-sum-exp with one autograd node and a dedicated
+backward calculation. This intentionally replaces the old objective
+`-target * log((1 - 2e-12) * softmax(logits) + 1e-12)`. The old smoothing capped a
+unit target's loss near 27.6 and suppressed gradients for confidently wrong
+predictions. The new objective is standard, unsmoothed cross entropy: logits
+`[1000, -1000]` targeting the second class give loss 2000 and gradient `[1, -1]`.
+Large common offsets stay stable; values beyond double's representable range may
+still overflow. Nonfinite logits/targets and negative target weights are rejected.
+
+Checkpoint format and the `CrossEntropy` loss identifier are unchanged. Existing
+checkpoints load with identical weights and optimizer state, but resumed training
+uses the new objective and need not follow the old trajectory. New checkpoints
+resume consistently with uninterrupted training. See the
+[classification measurements](benchmarks/FUSED_CROSS_ENTROPY_RESULTS.md).
 
 ## Optimizers
 
@@ -321,7 +343,6 @@ is another option, at the cost of a native dependency and memory management.
 A native backend is not implemented here.
 
 Remaining boundaries: mixed vector/matrix matmul supports forward execution but not
-autograd; cross entropy currently smooths softmax probabilities rather than using a
-fused log-sum-exp loss. Prediction and evaluation skip autograd recording;
+autograd. Prediction and evaluation skip autograd recording;
 explicit forward calls retain independent control of recording and training mode.
-These are opportunities for a separate API/numerical change.
+Mixed vector/matrix autograd remains a separate API task.
