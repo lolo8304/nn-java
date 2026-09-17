@@ -1,0 +1,7 @@
+/.gradle/**
+/.idea/**
+
+/mnist/*ubyte
+**/build/**
+
+**/*.nn
