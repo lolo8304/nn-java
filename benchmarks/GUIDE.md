@@ -153,3 +153,15 @@ public `matmul` can also run with `-PtensorBackend=java`.
 These benchmarks report microseconds per multiplication (or packing operation)
 and bytes/op through the GC profiler. Use the usual `-rff` option to preserve
 results. Complete training epochs remain the check for application-level benefit.
+
+## Reusable gradient storage
+
+```bash
+./gradlew :benchmarks:kernel --args='.*GradientStorageBenchmarks.backward$'
+./gradlew :benchmarks:kernel -PtensorBackend=java --args='.*GradientStorageBenchmarks.backward$'
+```
+
+Measures reset plus repeated backward through a shared 4,096-element addition graph.
+Graph construction and seed creation are outside timing. Read the
+[OPT-10 results](GRADIENT_STORAGE_RESULTS.md) for ownership semantics, full-epoch
+comparisons and raw allocation/timing data.

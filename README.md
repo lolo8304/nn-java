@@ -50,6 +50,10 @@ System.out.println(x.grad().scalar()); // 6.0
 ```
 
 Leaf gradients accumulate until `zeroGrad()` is called. Intermediate gradients are recomputed on each backward pass. `Optimizer.zeroGrad(parameters)` handles leaf resets during training.
+Gradient buffers are owned and reused. After reset, `grad()` returns null until
+the next contribution, while its storage is retained. A tensor returned by `grad()`
+is live and may change on later backward calls, even after reset; use `grad().copy()`
+to keep an independent snapshot.
 
 `predict`, `predictClasses`, and `evaluate` disable autograd recording automatically.
 For custom computations, use the exception-safe, thread-local scope:
@@ -276,8 +280,8 @@ detection can copy interleaved views even when their individual elements are dis
 Shape errors are rejected before destination writes.
 
 These are explicitly mutating operations: do not overwrite tensors that a live
-autograd graph still needs for backward. Optimizer fusion and automatic gradient
-buffer reuse remain separate future changes. Matmul destination buffers are not
+autograd graph still needs for backward. Optimizers and autograd use these primitives to update their owned buffers; see
+the [gradient storage results](benchmarks/GRADIENT_STORAGE_RESULTS.md). Matmul destination buffers are not
 part of this initial API.
 
 ### Global execution backend

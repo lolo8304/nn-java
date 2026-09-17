@@ -67,7 +67,7 @@ class ActivationGradientTest {
             x.zeroGrad();
             assertNull(x.grad());
             y.backward(seed);
-            assertNotSame(owned, x.grad());
+            assertSame(owned, x.grad());
             assertArrayEquals(first.toArray(), x.grad().toArray());
         }
     }

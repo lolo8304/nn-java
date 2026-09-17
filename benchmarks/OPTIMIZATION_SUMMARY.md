@@ -1,7 +1,29 @@
-# Performance and allocation summary through OPT-09
+# Performance and allocation summary through OPT-10
 
-Measured implementation: `4a4edcb`, 2026-09-17. This summary includes the work
-before the numbered roadmap and every completed item, OPT-01 through OPT-09.
+Latest implementation: OPT-10 working tree, 2026-09-17. This summary includes the work
+before the numbered roadmap and every completed item, OPT-01 through OPT-10.
+
+**Latest: reusable gradient storage (OPT-10)**
+
+Controlled before/after runs against `69bd410`, using two JVM forks, three
+one-second warmups and five one-second measurements per fork, show **99.6% less
+allocation** in repeated shared-graph backward (198,328 → 808 B/op). Backward time
+falls 41.0% with Vector and 30.0% with Java. Fresh-graph epochs save **20–34% allocation**.
+
+| Backend | Features | Before → after ms/epoch | Before → after MB/epoch |
+|---|---:|---:|---:|
+| VECTOR | 128 | 3.503 ± 0.089 → 3.564 ± 0.020 | 11.381 → 9.086 |
+| VECTOR | 784 | 15.987 ± 0.136 → 16.298 ± 0.089 | 38.372 → 25.338 |
+| JAVA | 128 | 5.145 ± 0.034 → 5.109 ± 0.026 | 11.230 → 8.935 |
+| JAVA | 784 | 20.578 ± 0.256 → 20.364 ± 0.121 | 38.254 → 25.216 |
+
+There is no general epoch speedup: timing intervals overlap except for the
+784-feature Vector workload, which is 1.9% slower in this run. Buffers remain owned
+by each variable across resets; `grad()` is null after reset and returns live mutable
+storage after backward. Retention may increase memory lifetime despite reducing
+allocation. See [full measurements, raw data and API semantics](GRADIENT_STORAGE_RESULTS.md).
+
+The remaining tables preserve the historical measurements through OPT-09 at `4a4edcb`.
 JAVA means the Java backend without the incubator Vector module; VECTOR means
 explicit Vector API kernels where supported, with Java fallbacks elsewhere.
 
@@ -12,7 +34,7 @@ Time reduction is `(before - after) / before`; speedup is `before / after`.
 For example, 50% less time means 2× throughput for the same amount of work.
 Percentages are calculated from recorded means and rounded for display.
 
-**Current full-epoch results after OPT-09**
+**Historical full-epoch results after OPT-09**
 
 Fresh runs at `4a4edcb` on Apple M4 Pro (arm64), OpenJDK 26.0.2. Each operation
 trains 1,024 synthetic samples, batch 32, Dense(features,64) → ReLU → Dense(64,10),
@@ -51,7 +73,7 @@ summarize the recorded trajectory, not a newly controlled paired experiment.
 The original pre-roadmap implementation has no comparable full-epoch measurement,
 so a total speedup from the initial implementation cannot be established.
 
-Reproduce the current runs from the repository root:
+Reproduce the historical OPT-09 runs at that revision from the repository root:
 
 ```sh
 mkdir -p benchmarks/results/summary-opt09
@@ -119,6 +141,7 @@ otherwise, the loss is MSE. Allocation values use decimal MB/KB.
 | [OPT-07 — cache blocking](BLOCKED_MATMUL_RESULTS.md) | 784-feature epoch: 22.367 → 21.084 ms; **5.7% less time**, 1.06× | Same epoch: 18.785 → 16.976 ms; **9.6% less time**, 1.11× | Epoch allocation essentially unchanged; eligible strided-right scratch bounded to **32 KiB**. No established 128-feature epoch gain |
 | [OPT-08 — fused cross entropy](FUSED_CROSS_ENTROPY_RESULTS.md) | Loss forward/backward: 8.465 → 3.621 µs; **57.2% less time**, 2.34× | Loss forward/backward: 8.439 → 3.622 µs; **57.1% less time**, 2.33× | Loss allocation ~52.2 → 16.8 KB (**67.8% less**). Classification epochs save ~1.14 MB (**7.7–7.8%** at 128 features; **2.7%** at 784) |
 | [OPT-09 — fused activation backward](FUSED_ACTIVATION_RESULTS.md) | First contribution **5.06–16.40×** faster in short kernel measurements | First contribution **4.96–16.32×** faster in short kernel measurements | First contribution **80.0–83.3% less allocation**; adding to an existing gradient ~0 B. Saved activations remain available to other branches |
+| [OPT-10 — reusable gradient storage](GRADIENT_STORAGE_RESULTS.md) | Repeated backward **41.0% faster**; no general epoch speedup | Repeated backward **30.0% faster**; epoch timing intervals overlap | Repeated backward **99.6% less allocation**; full epochs **20–34% less allocation** |
 
 Additional scope behind these results:
 
@@ -173,10 +196,10 @@ raw samples. Historical smoke tests are intentionally kept separate.
 The largest demonstrated full-epoch gains came from removing optimizer temporaries
 and bulk-loading batches. Vector acceleration helps selected arithmetic and matrix
 kernels, while the same allocation reductions generally benefit both backends.
-The next planned work is OPT-10: broader gradient-buffer reuse. Peak-memory and
+The next planned work is OPT-11: profile-guided kernel coverage. Peak-memory and
 real MNIST augmentation/validation/checkpoint measurements remain unmeasured here.
 
-The implementation through OPT-09 passed **91 tests per backend (182 executions)**,
+The implementation through OPT-10 passes **98 tests per backend (196 executions)**,
 including numerical gradients, alias/stride behavior, graph branches, repeated
-backward, training and checkpoint tests. This summary adds documentation and benchmark
-results only; it does not change the implementation.
+backward, training and checkpoint tests. OPT-10 also verifies storage reuse, aliased seeds, stale nonfinite gradients and
+absent versus zero gradients with optimizer momentum.

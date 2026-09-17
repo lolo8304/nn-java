@@ -11,6 +11,7 @@ public class Variable {
     private final List<Variable> parents;
     private final Consumer<Tensor> backwardFn;
     private Tensor grad;
+    private Tensor gradStorage;
 
     public Variable(Tensor value, boolean requiresGrad) {
         this(value, requiresGrad, List.of(), null);
@@ -54,6 +55,11 @@ public class Variable {
         return value;
     }
 
+    /**
+     * Returns the live, owned gradient buffer, or null when no gradient is present.
+     * Backward may update this tensor in place, including after zeroGrad().
+     * Call copy() when an independent snapshot is needed.
+     */
     public Tensor grad() {
         return grad;
     }
@@ -62,17 +68,28 @@ public class Variable {
         return requiresGrad;
     }
 
+    /** Marks the gradient absent while retaining storage for the next contribution. */
     public void zeroGrad() {
         grad = null;
     }
 
     private void addGrad(Tensor g) {
-        if (requiresGrad) grad = grad == null ? g.copy() : grad.add(g);
+        if (!requiresGrad) return;
+        if (grad != null) {
+            grad.addInto(g, grad);
+        } else {
+            // Overwrite, rather than add to stale storage: preserves signed zero and
+            // discards previous NaNs/infinities. Incoming contributions remain borrowed.
+            if (gradStorage == null) gradStorage = g.copy();
+            else g.copyInto(gradStorage);
+            grad = gradStorage;
+        }
     }
 
     // Gradients own their storage: never reuse saved activations or incoming adjoints.
     private Tensor activationGrad() {
-        if (grad == null) grad = Tensor.zeros(value.shape());
+        if (gradStorage == null) gradStorage = Tensor.zeros(value.shape());
+        grad = gradStorage;
         return grad;
     }
 
@@ -317,7 +334,7 @@ public class Variable {
         Set<Variable> seen = Collections.newSetFromMap(new IdentityHashMap<>());
         build(this, seen, topo);
         // Intermediate adjoints belong to this traversal; only leaf gradients accumulate.
-        for (Variable v : topo) if (!v.parents.isEmpty()) v.grad = null;
+        for (Variable v : topo) if (!v.parents.isEmpty()) v.zeroGrad();
         addGrad(seed);
         for (int i = topo.size() - 1; i >= 0; i--) {
             Variable v = topo.get(i);
