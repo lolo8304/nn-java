@@ -1,10 +1,14 @@
 package ch.lolo.nn;
 
-import ch.lolo.nn.data.*;
+import ch.lolo.nn.data.DataLoader;
+import ch.lolo.nn.data.Dataset;
+import ch.lolo.nn.data.Sample;
 import ch.lolo.tensor.Tensor;
 import org.junit.jupiter.api.Test;
+
 import java.util.HashSet;
 import java.util.NoSuchElementException;
+
 import static org.junit.jupiter.api.Assertions.*;
 
 class DataLoaderTest {

@@ -1,15 +1,16 @@
 package ch.lolo.nn;
 
-import ch.lolo.nn.layers.Dense;
-import ch.lolo.nn.loss.CrossEntropyLoss;
-import ch.lolo.nn.optim.Adam;
-import org.junit.jupiter.api.io.TempDir;
-import java.nio.file.Path;
 import ch.lolo.nn.data.TensorDataset;
+import ch.lolo.nn.layers.Dense;
 import ch.lolo.nn.layers.Dropout;
 import ch.lolo.nn.layers.ReLU;
+import ch.lolo.nn.loss.CrossEntropyLoss;
+import ch.lolo.nn.optim.Adam;
 import ch.lolo.tensor.Tensor;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+
+import java.nio.file.Path;
 
 import static org.junit.jupiter.api.Assertions.*;
 
