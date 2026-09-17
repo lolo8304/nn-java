@@ -131,3 +131,25 @@ Defaults match the kernel/training forks, warmup, measurements, heap and GC prof
 Time is microseconds per prediction batch; normalized allocation is bytes per batch.
 Results default to `benchmarks/build/results/inference-vector.json` or
 `inference-java.json`. Use `-rff` to preserve comparisons.
+
+## Transposed-right matrix multiplication
+
+```bash
+./gradlew :benchmarks:kernel --args='.*TransposedMatmulBenchmarks.matmul$'
+./gradlew :benchmarks:kernel --args='.*TransposedMatmulBenchmarks.(packed|panelPacked|packOnly|panelPackOnly)$'
+```
+
+Shapes are `rows x reduction x outputColumns`, for example `32x64x784` models
+`g.matmul(weights.transpose())` with 32 samples, 64 outputs and 784 inputs.
+Override with `-p shape=4x16x16,32x10x64`. Public `matmul` includes dispatch, tensor
+allocation and any packing; `packed` and `panelPacked` compare raw whole-matrix
+and 64-column panel packing plus multiplication. `packOnly` and `panelPackOnly`
+isolate packing, including scratch allocation. The latter consumes each reused
+panel through a Blackhole. Raw candidates omit tensor wrappers and shape checks.
+`direct` retains an experimental gather kernel that was rejected on the measured
+M4 Pro/JDK combination. All raw kernel candidates require the VECTOR backend;
+public `matmul` can also run with `-PtensorBackend=java`.
+
+These benchmarks report microseconds per multiplication (or packing operation)
+and bytes/op through the GC profiler. Use the usual `-rff` option to preserve
+results. Complete training epochs remain the check for application-level benefit.

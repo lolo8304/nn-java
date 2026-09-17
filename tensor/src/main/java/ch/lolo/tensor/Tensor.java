@@ -596,10 +596,18 @@ public final class Tensor {
     // Direct stride arithmetic also supports transposed and sliced views used in backpropagation.
     private Tensor matmul2d(Tensor b, int m, int k, int n) {
         Tensor out = alloc(m, n);
-        if (backend == TensorBackend.VECTOR && b.strides[1] == 1) {
-            VectorKernels.matmul(data, offset, strides[0], strides[1], b.data, b.offset,
-                    b.strides[0], out.data, m, k, n);
-            return out;
+        if (backend == TensorBackend.VECTOR) {
+            if (b.strides[1] == 1) {
+                VectorKernels.matmul(data, offset, strides[0], strides[1], b.data, b.offset,
+                        b.strides[0], out.data, m, k, n);
+                return out;
+            }
+            // Amortize fresh panel packing across rows; small products keep the scalar path.
+            if (m >= 4 && k >= 8 && n >= 16) {
+                VectorKernels.matmulPackedRight(data, offset, strides[0], strides[1], b.data, b.offset,
+                        b.strides[0], b.strides[1], out.data, m, k, n);
+                return out;
+            }
         }
         for (int row = 0; row < m; row++) {
             int left = offset + row * strides[0];

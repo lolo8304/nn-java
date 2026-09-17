@@ -82,9 +82,15 @@ final class VectorKernels {
     static void matmul(double[] a, int ao, int rowStride, int innerStride,
                        double[] b, int bo, int rightRowStride,
                        double[] out, int m, int k, int n) {
+        matmul(a, ao, rowStride, innerStride, b, bo, rightRowStride, out, 0, n, m, k, n);
+    }
+
+    private static void matmul(double[] a, int ao, int rowStride, int innerStride,
+                               double[] b, int bo, int rightRowStride,
+                               double[] out, int outputOffset, int outputRowStride, int m, int k, int n) {
         int bound = SPECIES.loopBound(n);
         for (int row = 0; row < m; row++) {
-            int left = ao + row * rowStride, output = row * n;
+            int left = ao + row * rowStride, output = outputOffset + row * outputRowStride;
             for (int q = 0; q < k; q++) {
                 double value = a[left + q * innerStride];
                 int right = bo + q * rightRowStride;
@@ -99,4 +105,25 @@ final class VectorKernels {
             }
         }
     }
+
+    // Pack at most 64 output columns, reusing only this call's scratch panel.
+    // Read the current values on every invocation: tensor views/weights are mutable.
+    static void matmulPackedRight(double[] a, int ao, int rowStride, int innerStride,
+                                  double[] b, int bo, int rightRowStride, int rightColumnStride,
+                                  double[] out, int m, int k, int n) {
+        if (m == 0 || k == 0 || n == 0) return;
+        int width = Math.min(n, 64);
+        double[] panel = new double[k * width];
+        for (int start = 0; start < n; start += width) {
+            int columns = Math.min(width, n - start);
+            for (int q = 0; q < k; q++) {
+                int right = bo + q * rightRowStride + start * rightColumnStride;
+                for (int col = 0; col < columns; col++)
+                    panel[q * columns + col] = b[right + col * rightColumnStride];
+            }
+            matmul(a, ao, rowStride, innerStride, panel, 0, columns,
+                    out, start, n, m, k, columns);
+        }
+    }
+
 }

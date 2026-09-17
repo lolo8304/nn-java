@@ -41,8 +41,8 @@ OPT-04 then reduces it to about 13.9 MB; see the [bulk batch measurements](bench
 | 3 · OPT-03 | Done | NN + Tensor | Fuse Adam and SGD updates | Update owned moments, velocities and parameters directly instead of constructing temporary tensor chains and indexed deltas. Add fused primitives such as `axpy` if needed. This targets the largest measured time/allocation source. | Implemented in this commit; reference steps, absent/empty gradients, resume and alias tests pass on both backends. [Measurements and raw results](benchmarks/FUSED_OPTIMIZER_RESULTS.md). |
 | 4 · OPT-04 | Done | NN data | Bulk batch assembly | Replace per-element generator/index-array copying with checked stack/gather/copy operations into batches. Targets the measured 8.2 MB/epoch loader allocation. | Implemented with checked row copies in [DataLoader](nn/src/main/java/ch/lolo/nn/data/DataLoader.java). Shuffle/fetch-once, shape, stride and partial-batch tests pass on both backends. [Loading and epoch measurements](benchmarks/BULK_BATCH_RESULTS.md). |
 | 5 · OPT-05 | Done | NN inference | Skip autograd graphs during inference | Added exception-safe, thread-local no-grad scopes and early recording checks to avoid parent lists, backward closures and retained graph intermediates during prediction/evaluation. | Implemented in [GradMode](nn/src/main/java/ch/lolo/nn/autograd/GradMode.java) and prediction/evaluation. Parity, gradient, scope and dropout tests pass on both backends. Training mode remains independent. [Inference measurements](benchmarks/NO_GRAD_RESULTS.md). |
-| 6 · OPT-06 | Next | Tensor | Vector matmul with transposed right operand | Optimize `g.matmul(weights.transpose())`, which currently uses the Java fallback. Evaluate dedicated kernels or temporary packed panels. | Test offsets, strides, tails and input gradients; measure packing cost across sizes. Never reuse stale packed weights after updates. |
-| 7 · OPT-07 | Planned | Tensor | Cache-blocked matrix multiplication | Tile larger products to reuse input/output data in CPU caches. Keep a small-matrix path where tiling overhead would dominate. | Measure representative layer shapes; preserve reduction order or explicitly validate rounding changes. Check both transpose directions. |
+| 6 · OPT-06 | Done | Tensor | Vector matmul with transposed right operand | Use fresh 64-column panels for larger transposed/strided-right products, preserving summation order. Small products retain the scalar path; no packed weights are cached. | Implemented in [VectorKernels](tensor/src/main/java/ch/lolo/tensor/VectorKernels.java). Offset/stride/tail, exact arithmetic, updated-weight and input-gradient tests pass on both backends. [Packing, kernel and epoch measurements](benchmarks/TRANSPOSED_MATMUL_RESULTS.md). |
+| 7 · OPT-07 | Next | Tensor | Cache-blocked matrix multiplication | Tile larger products to reuse input/output data in CPU caches. Keep a small-matrix path where tiling overhead would dominate. | Measure representative layer shapes; preserve reduction order or explicitly validate rounding changes. Check both transpose directions. |
 | 8 · OPT-08 | Planned | NN loss | Stable fused cross entropy | Use log-sum-exp directly from logits and a dedicated backward calculation to avoid the softmax/smoothing/log/multiply graph. | Explicitly address the change from the current epsilon-smoothed objective. Test target normalization, extreme logits, finite differences, convergence and persistence. Benchmark classification separately from the current MSE baseline. |
 | 9 · OPT-09 | Planned | NN gradients | Fuse activation backward kernels | Compute ReLU/LeakyReLU, sigmoid and tanh derivatives directly into gradient destinations instead of allocating masks and intermediate tensors. | Finite differences, zero/saturation behavior, strided views and allocation measurements. Retain activations still needed by other graph branches. |
 | 10 · OPT-10 | Planned | NN gradients | Reuse gradient storage | Accumulate into owned gradient buffers instead of copying the first contribution and reallocating on subsequent contributions. Reuse storage across resets where safe. | Shared graphs, repeated backward, leaf accumulation, seed non-aliasing and zero-gradient semantics remain correct. Measure backward allocation and full epochs. |
@@ -51,18 +51,24 @@ OPT-04 then reduces it to about 13.9 MB; see the [bulk batch measurements](bench
 | 13 · OPT-13 | Deferred | Tensor | Parallel large matrix multiplication | Distribute independent output tiles across a bounded CPU worker pool once serial kernels are tuned. | Size thresholds, no nested oversubscription, controlled interaction with data loading, and latency/throughput measurements on larger models. |
 | 14 · OPT-14 | Deferred | Tensor architecture | Float32 and native BLAS evaluation | Evaluate these as separate backend/data-type projects after simpler optimizations. Float32 reduces element storage; native BLAS may help sufficiently large products. | Measure conversion/copy/native-call overhead; define precision, convergence, packaging, memory lifetime and checkpoint compatibility. Preserve portable Java/Vector paths. |
 
-**Start next with OPT-06.** OPT-05 is complete; see [inference results](benchmarks/NO_GRAD_RESULTS.md).
+**Start next with OPT-07.** OPT-06 is complete; see [transposed matmul results](benchmarks/TRANSPOSED_MATMUL_RESULTS.md).
+Eligible measured Vector products are 2.5–4.0× faster with packing included.
+At 128 features, full epochs improve from 4.204 to 3.931 ms, with allocation rising
+from 13.861 to 14.016 MB due to fresh panels. The 784-feature full-epoch timing
+intervals overlap; no clear epoch-level gain is established for that shape.
+
+OPT-05 is complete; see [inference results](benchmarks/NO_GRAD_RESULTS.md).
 The Vector inference sweep saves roughly 730 bytes per prediction batch (about 22%
 at batch size 1 and 1.3% at batch size 32). Timing uncertainty prevents a general
-latency speedup claim. Larger-shape measurements remain necessary for OPT-06.
+latency speedup claim.
 
 OPT-04 is complete; see [bulk batch results](benchmarks/BULK_BATCH_RESULTS.md).
 For the 128-feature workload, loader allocation fell from 8.228 to 1.636 MB/epoch;
 Vector full epochs improved from 6.006 to 4.288 ms and Java from 7.250 to 5.630 ms.
-Full-epoch allocation is now about 13.9 MB. The new instrumented Vector profile
+After OPT-04, full-epoch allocation was about 13.9 MB. Its instrumented Vector profile
 puts loading at 5–8% of epoch time and backward at 52–60%, with about 10.3 MB
 allocated in backward after warmup. OPT-09/10 remain promising training follow-ups;
-OPT-06 onward is provisional until larger-shape and real-data profiles support the order.
+OPT-07 onward is provisional until larger-shape and real-data profiles support the order.
 
 ## Detailed follow-up backlog
 

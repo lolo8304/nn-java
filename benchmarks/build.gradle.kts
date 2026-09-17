@@ -35,3 +35,8 @@ tasks.register<JavaExec>("profile") {
         jvmArgs("-XX:StartFlightRecording=filename=${recording.get()},settings=profile,dumponexit=true")
     }
 }
+
+// Experimental Vector kernels in the transposed-matmul comparison benchmarks.
+tasks.withType<JavaCompile>().configureEach {
+    options.compilerArgs.addAll(listOf("--add-modules", "jdk.incubator.vector"))
+}

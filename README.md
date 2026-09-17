@@ -299,10 +299,12 @@ supply `--add-modules jdk.incubator.vector`.
 
 Vector kernels cover contiguous same-shape add/subtract/multiply/divide, scalar
 arithmetic in either operand order, contiguous 2D matrices with a 1D right-hand
-bias, ReLU, and 2D matmul when right-hand rows are contiguous. Matmul supports
-strided/transposed left operands and offset views. Kernels use the CPU's preferred
-vector width with scalar tails. Other layouts and operations, including transposed
-right-hand matmul, batched matmul, reductions, arbitrary `map` callbacks, and
+bias, ReLU, and 2D matmul when right-hand rows are contiguous. Larger 2D products
+with transposed/strided right operands use fresh 64-column packing panels; smaller
+products keep the scalar path. Matmul supports strided operands and offset views,
+and packing is never cached across mutations. Kernels use the CPU's preferred
+vector width with scalar tails. Other
+operations, including batched matmul, reductions, arbitrary `map` callbacks, and
 transcendental functions, retain the Java implementation. Copies use `System.arraycopy`.
 Matmul preserves the reduction order and uses separate multiply/add operations,
 not fused multiply-add. No speedup is guaranteed; benchmark your workload.

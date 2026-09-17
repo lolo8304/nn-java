@@ -1,0 +1,42 @@
+> Task :tensor:compileJava UP-TO-DATE
+> Task :nn:compileJava UP-TO-DATE
+> Task :benchmarks:compileJava UP-TO-DATE
+> Task :benchmarks:processResources NO-SOURCE
+> Task :benchmarks:classes UP-TO-DATE
+> Task :nn:processResources NO-SOURCE
+> Task :nn:classes UP-TO-DATE
+> Task :nn:jar UP-TO-DATE
+> Task :tensor:processResources NO-SOURCE
+> Task :tensor:classes UP-TO-DATE
+> Task :tensor:jar UP-TO-DATE
+
+> Task :benchmarks:profile
+WARNING: Using incubator modules: jdk.incubator.vector
+Backend=VECTOR Java=26.0.2 samples=1024 features=128 batch=32 warmup=5 runs=3 epochs/run=5
+Synthetic regression, Dense(features,64)/ReLU/Dense(64,10), MSE, Adam. No augmentation, validation, logging or checkpoint IO in timing.
+Run 1: 5.498 ms/epoch, 186233 samples/s, 14631205 bytes/epoch, GC=1 collections/0 ms, loss=0.01980394
+  load/shuffle           0.247 ms/epoch    4.5%      1701221 bytes/epoch
+  zero gradients         0.013 ms/epoch    0.2%         1024 bytes/epoch
+  forward + loss         1.547 ms/epoch   28.1%      1972013 bytes/epoch
+  backward               3.307 ms/epoch   60.1%     10951027 bytes/epoch
+  optimizer              0.315 ms/epoch    5.7%         5120 bytes/epoch
+  Percentages exclude loop/instrumentation overhead; allocation counters cover this thread only.
+Run 2: 4.501 ms/epoch, 227498 samples/s, 14100568 bytes/epoch, GC=1 collections/1 ms, loss=0.01980394
+  load/shuffle           0.202 ms/epoch    4.5%      1701208 bytes/epoch
+  zero gradients         0.004 ms/epoch    0.1%         1024 bytes/epoch
+  forward + loss         1.555 ms/epoch   34.6%      1971456 bytes/epoch
+  backward               2.415 ms/epoch   53.7%     10420992 bytes/epoch
+  optimizer              0.292 ms/epoch    6.5%         5120 bytes/epoch
+  Percentages exclude loop/instrumentation overhead; allocation counters cover this thread only.
+Run 3: 4.280 ms/epoch, 239251 samples/s, 14100568 bytes/epoch, GC=1 collections/1 ms, loss=0.01980394
+  load/shuffle           0.179 ms/epoch    4.2%      1701208 bytes/epoch
+  zero gradients         0.003 ms/epoch    0.1%         1024 bytes/epoch
+  forward + loss         1.420 ms/epoch   33.2%      1971456 bytes/epoch
+  backward               2.364 ms/epoch   55.2%     10420992 bytes/epoch
+  optimizer              0.281 ms/epoch    6.6%         5120 bytes/epoch
+  Percentages exclude loop/instrumentation overhead; allocation counters cover this thread only.
+Epoch ms across runs: min=4.280 median=4.501 max=5.498
+
+BUILD SUCCESSFUL in 1s
+6 actionable tasks: 1 executed, 5 up-to-date
+Consider enabling configuration cache to speed up this build: https://docs.gradle.org/9.7.1/userguide/configuration_cache_enabling.html
