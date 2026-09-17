@@ -1,71 +1,90 @@
-# Tensor and NN optimization roadmap
+# Tensor and NN optimization tracker
 
-Status: proposed work, based on the current Java 26 implementation. Vector is the
-default backend, with an explicit Java override. Priorities are engineering estimates,
-not measured speedup guarantees. Preserve both backends and compare complete training
-and inference workloads before accepting a performance change.
+Last updated: 2026-09-17. Baseline: commit `4937fc0`, Java 26.0.2, Vector backend
+by default, with an explicit Java override. This file is the working backlog for
+future optimization tasks. Use the IDs below when selecting work.
 
-## First: reliable measurements
+Status values: **Done**, **Next**, **Planned**, **In progress**, **Blocked**,
+**Deferred**. Only mark an item Done after implementation, relevant tests on both
+backends, and recorded measurements. Nothing is currently In progress.
 
-- [x] **Add JMH benchmarks with multiple forks and sufficient warmup.** Measure small,
-  medium, and MNIST-sized tensors, vector tails, contiguous/strided inputs, both
-  matmul transposes, allocation rate, and GC time. The current 100-operation warmup
-  produces variable dense Vector allocations.
-- [x] **Add repeatable end-to-end benchmarks.** Measure samples/second, epoch time,
-  inference latency, and peak memory on fixed datasets/seeds. Separate data loading,
-  augmentation, forward, backward, optimizer, and checkpoint time. Profile before
-  choosing the next kernel to optimize. Do not use test accuracy to tune performance.
+## Evidence behind the order
 
-Implemented measurement foundation: `benchmarks` now supplies forked JMH kernel and
-complete synthetic-epoch workloads, allocation/GC profiling, repeated phase profiles,
-and optional JFR recording. Real MNIST augmentation/checkpoint profiles and exact
-peak-live-memory measurement remain follow-up work; see [the guide](benchmarks/GUIDE.md).
+Source: [measured results](benchmarks/OUTPUT_BUFFER_RESULTS.md) and
+[benchmark/profiling guide](benchmarks/GUIDE.md).
 
-## Tensor priorities
+- Reusable Vector elementwise operations: **3.697 → 1.306 µs/op**, with allocation
+  reduced from **98,832 → 48 B/op**. Buffer primitives and optimizer integration are implemented; gradient integration
+  remains outstanding.
+- Complete synthetic training: **13.390 ms/epoch** with Vector and **15.082 ms/epoch**
+  with Java, approximately **52.6 MB allocated per epoch**.
+- In the representative instrumented Vector run, **Adam/parameter updates consume
+  55.3% of epoch time and 32.1 MB/epoch**, about 61% of allocations.
+- **Loading/shuffling consumes 14.3% of time and 8.2 MB/epoch**. Backward consumes
+  19.3% and 10.3 MB; forward/loss consumes 10.8% and 2.0 MB.
 
-| Priority | Optimization | Current opportunity | Validation / tradeoff |
-|---|---|---|---|
-| High | Vector matmul with a transposed right operand | `g.matmul(weights.transpose())` uses the scalar fallback in input-gradient computation. Evaluate packed panels or a dedicated transpose-aware kernel. | Benchmark packing overhead and small shapes; verify offset/stride handling. Avoid stale packed weights after optimizer updates. |
-| High | Cache-blocked matmul | The current kernel repeatedly streams right-hand rows and output data. Tile larger products to improve cache reuse. | Tune against representative shapes and CPU caches; retain a small-matrix path. Preserve reduction order unless explicitly accepting rounding changes. |
-| Foundation implemented | Destination-buffer operations | Public arithmetic/scalar `*Into`, `copyInto`, and `reluInto` now reuse destinations. Fused `axpy`, optimizer integration, and gradient reuse remain future work. | Snapshot semantics protect overlapping views; exact-layout updates and independent destinations avoid full-sized scratch buffers. |
-| Medium | Faster reductions | `sum`, axis reductions, min/max, and softmax row reductions still use Java loops or indexed iteration. Add specialized contiguous kernels and evaluate SIMD. | Vector sums change addition order. Test cancellation, extreme magnitudes, NaNs, infinities, signed zero, and empty tensors; use documented tolerances. |
-| Medium | Extend broadcast SIMD coverage | The explicit Vector broadcast path handles a contiguous 2D matrix and 1D right operand. Add common singleton-axis and higher-rank cases. | Avoid copying whole broadcast operands; compare setup overhead on small tensors. Preserve operand order for subtraction/division. |
-| Medium | Faster noncontiguous traversal | Generic map/copy/extrema and some fallbacks still allocate index arrays. Use internal stride cursors and direct offsets. | Keep public generator callback semantics unchanged; validate arbitrary rank, singleton axes, offsets, and empty shapes. |
-| Medium | Batched matmul kernel reuse | Batched matmul still computes each output through the generic indexing path. Resolve batch base addresses once and reuse optimized 2D kernels. | Test broadcasted batch dimensions, vector operands, and strided views. |
-| Medium | Specialized unary kernels | Negation, square, sigmoid, tanh, log, and general callbacks retain Java paths. Add dedicated kernels where profiles justify them. | Do not try to vectorize arbitrary callbacks. Check special-value behavior and numerical error for transcendental functions. |
-| Later | Parallel large matmul | Independent output tiles can run on a bounded worker pool. | Add size thresholds; avoid scheduling overhead, nested parallelism, and contention with data loading. Measure single-request latency and throughput separately. |
-| Later | Float32 tensors | An optional float representation halves raw element storage versus double and may improve memory bandwidth utilization. | Significant API, kernel, optimizer, and persistence work; validate convergence and define accumulator precision. |
-| Later | Native BLAS backend | Evaluate a native backend for large dense products while retaining Java/Vector portability. | Include native-call, layout-conversion, copying, packaging, and memory-lifetime costs in the benchmark. |
+These results use 1,024 synthetic samples, 128 features, batch size 32, a
+128 → 64 → 10 network, MSE and Adam. They exclude augmentation, validation,
+checkpoint IO and inference-only workloads. Phase timing includes instrumentation
+and GC effects. Other proposed benefits below are hypotheses, not measured speedups.
 
-## Neural-network priorities
+The figures above are the pre-OPT-03 baseline. Fused optimizer updates reduce
+full-epoch allocation to about 20.5 MB; see the [updated measurements](benchmarks/FUSED_OPTIMIZER_RESULTS.md).
 
-| Priority | Optimization | Current opportunity | Validation / tradeoff |
-|---|---|---|---|
-| High | Fuse Adam and SGD updates | Optimizers build chains of temporary tensors; `Parameter.applyDelta` then iterates with index arrays. Update owned moments, velocities, and parameter storage directly. | Requires safe destination-buffer kernels. Compare multiple steps and save/load/resume behavior; handle absent and empty gradients. |
-| High | Inference without autograd graphs | `predict` calls the ordinary forward path; trainable parameters cause graph nodes and backward closures to be retained. Add an exception-safe inference/no-grad context or a dedicated inference path. | Do not interpret `training=false` as globally disabling gradients: dropout mode and gradient recording are separate concepts. Test output parity and that inference leaves parameter gradients unchanged. |
-| High | Fuse stable cross entropy from logits | Current loss constructs softmax, smoothing, log, multiply, and sum nodes. A log-sum-exp loss with a direct backward kernel reduces intermediates and handles extreme logits better. | This changes the current epsilon-smoothed objective. Introduce it explicitly or document migration; verify normalization, target semantics, extreme logits, finite differences, and model persistence. |
-| High | Bulk batch assembly | `DataLoader` uses `Tensor.generate` plus `Arrays.copyOfRange` for every input/target element. Add checked stack/gather/copy operations to copy each sample in bulk. | Preserve sample order, fetch-once behavior, shape validation, and final partial batches. Keep strided sample support. |
-| Medium | Reuse gradient storage | `addGrad` copies the first contribution and allocates another tensor for each accumulation; `zeroGrad` discards storage. Reuse owned buffers where safe. | Preserve shared-graph accumulation, repeated backward calls, leaf-gradient semantics, and non-aliasing with seeds/inputs. |
-| Medium | Fuse activation backward kernels | ReLU/LeakyReLU generate masks; sigmoid/tanh create several temporary tensors. Compute each derivative directly into its gradient destination. | Check values around zero, saturation, strided views, and finite-difference gradients. Avoid overwriting activations still needed elsewhere in the graph. |
-| Medium | Reduce graph bookkeeping | Each node stores parent collections and closures; each backward traversal creates a topology list and identity set using recursive traversal. Evaluate leaner node representations and iterative traversal. | Profile first. Deep graphs, diamonds, shared nodes, and repeated backward must remain correct; do not cache a topology across changing graphs. |
-| Medium | Profile and optimize image augmentation | Determine whether resampling dominates epoch time before optimizing loops or adding bounded prefetch. | Keep training-only augmentation and label integrity. Parallel RNG use must have a defined reproducibility policy and must not leak validation/test data. |
-| Medium | Direct argmax/metric kernels | Prediction and metrics use slices and indexed access; `predictClasses` repeatedly clones row shapes. Add a row-wise argmax primitive and reuse it. | Preserve tie behavior, shape validation, and the existing classification rules. |
-| Later | Fuse dense + bias + activation | Dense output, bias addition, and activation currently require separate passes and intermediates. Evaluate a fused inference kernel, then training support. | Training must retain the values required by backward; benchmark full layers and maintain separate unfused reference paths. |
-| Later | Training workspaces | Reuse batch, activation, and temporary buffers after ownership and lifetime rules exist. | Build on destination-buffer operations; never overwrite values retained by a live autograd graph or user-visible tensors. |
-| Later | Cheaper checkpoint serialization | Optimizer serialization creates default zero tensors even for existing state through eager `getOrDefault` arguments, and converts tensors to arrays. Avoid unnecessary defaults and copies. | Keep existing checkpoint compatibility and deterministic optimizer resume tests. Profile checkpoint frequency before prioritizing. |
+## Ordered implementation list
 
-## Suggested implementation sequence
+| Order / ID | Status | Area | Optimization | Description and reason | Completion criteria |
+|---|---|---|---|---|---|
+| 1 · OPT-01 | Done | Benchmarks | Establish reliable measurements | Added forked JMH kernels and complete synthetic epochs, allocation/GC reports, repeated training phase profiles, and optional JFR. This establishes the current baseline. | Implemented in `4937fc0`; guide and measured results linked above. Broader real-workload profiling remains OPT-15. |
+| 2 · OPT-02 | Done | Tensor | Reusable output buffers | Added tensor/scalar arithmetic `*Into`, `copyInto`, and `reluInto`. Supports exact in-place updates and snapshots differently mapped overlapping views. | Implemented in `4937fc0`; overlap/stride/shape tests and measured allocation reduction. Fused optimizer operations remain OPT-03. |
+| 3 · OPT-03 | Done | NN + Tensor | Fuse Adam and SGD updates | Update owned moments, velocities and parameters directly instead of constructing temporary tensor chains and indexed deltas. Add fused primitives such as `axpy` if needed. This targets the largest measured time/allocation source. | Implemented in this commit; reference steps, absent/empty gradients, resume and alias tests pass on both backends. [Measurements and raw results](benchmarks/FUSED_OPTIMIZER_RESULTS.md). |
+| 4 · OPT-04 | Next | NN data | Bulk batch assembly | Replace per-element generator/index-array copying with checked stack/gather/copy operations into batches. Targets the measured 8.2 MB/epoch loader allocation. | Preserve shuffle order, fetch-once behavior, sample shape checks, strided samples and final partial batches. Measure loading and complete epochs. |
+| 5 · OPT-05 | Planned | NN inference | Skip autograd graphs during inference | Introduce an exception-safe no-grad context or dedicated prediction path to avoid backward closures, parent lists and retained intermediates. Inference benefit is not yet measured. | Prediction parity, unchanged parameter gradients, correct dropout behavior, and inference latency/allocation measurements. Keep training mode separate from gradient recording. |
+| 6 · OPT-06 | Planned | Tensor | Vector matmul with transposed right operand | Optimize `g.matmul(weights.transpose())`, which currently uses the Java fallback. Evaluate dedicated kernels or temporary packed panels. | Test offsets, strides, tails and input gradients; measure packing cost across sizes. Never reuse stale packed weights after updates. |
+| 7 · OPT-07 | Planned | Tensor | Cache-blocked matrix multiplication | Tile larger products to reuse input/output data in CPU caches. Keep a small-matrix path where tiling overhead would dominate. | Measure representative layer shapes; preserve reduction order or explicitly validate rounding changes. Check both transpose directions. |
+| 8 · OPT-08 | Planned | NN loss | Stable fused cross entropy | Use log-sum-exp directly from logits and a dedicated backward calculation to avoid the softmax/smoothing/log/multiply graph. | Explicitly address the change from the current epsilon-smoothed objective. Test target normalization, extreme logits, finite differences, convergence and persistence. Benchmark classification separately from the current MSE baseline. |
+| 9 · OPT-09 | Planned | NN gradients | Fuse activation backward kernels | Compute ReLU/LeakyReLU, sigmoid and tanh derivatives directly into gradient destinations instead of allocating masks and intermediate tensors. | Finite differences, zero/saturation behavior, strided views and allocation measurements. Retain activations still needed by other graph branches. |
+| 10 · OPT-10 | Planned | NN gradients | Reuse gradient storage | Accumulate into owned gradient buffers instead of copying the first contribution and reallocating on subsequent contributions. Reuse storage across resets where safe. | Shared graphs, repeated backward, leaf accumulation, seed non-aliasing and zero-gradient semantics remain correct. Measure backward allocation and full epochs. |
+| 11 · OPT-11 | Planned | Tensor | Extend optimized kernel coverage | Add specialized reductions, common broadcast layouts, batched matmul dispatch and unary operations where profiling justifies them. Split work into the subitems below. | Benchmark each addition on both backends; retain Java fallbacks. Test floating-point edge cases and document changes in reduction order. |
+| 12 · OPT-12 | Planned | NN data | Optimize augmentation and prefetch | Profile real image transformations, improve hot resampling loops, and add bounded prefetch only if preparation limits training throughput. | Requires real-data profiling in OPT-15. Preserve training-only transforms, labels, deterministic RNG policy and validation/test isolation. |
+| 13 · OPT-13 | Deferred | Tensor | Parallel large matrix multiplication | Distribute independent output tiles across a bounded CPU worker pool once serial kernels are tuned. | Size thresholds, no nested oversubscription, controlled interaction with data loading, and latency/throughput measurements on larger models. |
+| 14 · OPT-14 | Deferred | Tensor architecture | Float32 and native BLAS evaluation | Evaluate these as separate backend/data-type projects after simpler optimizations. Float32 reduces element storage; native BLAS may help sufficiently large products. | Measure conversion/copy/native-call overhead; define precision, convergence, packaging, memory lifetime and checkpoint compatibility. Preserve portable Java/Vector paths. |
 
-1. Establish JMH and end-to-end baselines.
-2. Add safe internal destination-buffer kernels, then fuse optimizer updates.
-3. Add graph-free inference and bulk batch assembly as independent improvements.
-4. Optimize transpose-aware and cache-blocked matmul where the profile supports it.
-5. Introduce a separately validated stable fused loss and activation backward kernels.
-6. Evaluate reductions, wider SIMD coverage, parallelism, and float/native backends
-   using the updated profiles.
+**Start next with OPT-04.** OPT-03 is complete; see [fused optimizer results](benchmarks/FUSED_OPTIMIZER_RESULTS.md). Reprofile after OPT-04: removing allocations and
+GC work can change which computation is dominant. OPT-05 can be moved earlier if
+prediction latency becomes the main objective. OPT-06 onward is provisional until
+larger-shape and real-data profiles support the order.
 
-For each step, retain a reference implementation, run both backend suites, check
-relevant gradients, and report runtime plus allocation changes. Numerical changes
-need explicit error tolerances and convergence checks. Mixed vector/matrix autograd
-support is also unfinished, but it is a correctness/coverage feature rather than
-a performance optimization.
+## Detailed follow-up backlog
+
+These items preserve narrower opportunities from the original analysis. Their
+statuses are independent of their parent items; completing one does not complete
+the whole parent optimization.
+
+| ID | Status | Related item | Optimization | Description / acceptance criteria |
+|---|---|---|---|---|
+| OPT-15 | Planned | OPT-01, OPT-12 | Broader workload profiling | Add real MNIST augmentation/validation/checkpoint breakdowns, standalone inference benchmarks and an explicit peak-memory methodology. Current allocation counters do not measure peak live memory. |
+| OPT-16 | Planned | OPT-11 | Reduction kernels | Specialize sum, axis reductions, min/max and softmax row reductions. SIMD sums may reorder additions; test cancellation, large magnitudes, NaNs, infinities, signed zero and empty shapes. |
+| OPT-17 | Planned | OPT-11 | Broadcast SIMD coverage | Extend beyond same-shape/scalar operations and 2D matrix + 1D right operand to singleton axes and higher ranks. Avoid materializing full broadcast operands; preserve subtraction/division operand order. |
+| OPT-18 | Planned | OPT-11 | Noncontiguous traversal | Replace remaining per-element index arrays in generic map/copy/extrema and fallback paths with stride cursors. Preserve public generator callback semantics and test arbitrary ranks and empty shapes. |
+| OPT-19 | Planned | OPT-11 | Batched matmul reuse | Resolve each batch's source offsets once and reuse optimized 2D kernels rather than the generic per-output path. Cover batch broadcasting, vectors and strided views. |
+| OPT-20 | Planned | OPT-11 | Unary kernels | Specialize negate, square, sigmoid, tanh and log where measured. Do not attempt to infer arbitrary callback behavior; validate approximation error and special values. |
+| OPT-21 | Planned | OPT-10 | Autograd bookkeeping | Profile parent collections, closures, topology allocation and recursive traversal. Evaluate iterative traversal and leaner node storage; preserve deep/shared graphs and repeated backward. |
+| OPT-22 | Planned | OPT-05 | Argmax and metric kernels | Replace repeated slicing/indexing/shape cloning with row-wise argmax operations. Preserve ties, shape checks and classification semantics. |
+| OPT-23 | Deferred | OPT-05, OPT-07 | Dense + bias + activation fusion | Start with inference to reduce passes and intermediates. Training support must retain the values needed by backward and preserve an unfused reference path. |
+| OPT-24 | Deferred | OPT-02, OPT-10 | Training workspaces | Reuse batch, activation and temporary storage only after ownership/lifetime rules are established. Do not overwrite live graph values or user-visible tensors. |
+| OPT-25 | Planned | OPT-15 | Checkpoint allocation | Avoid eager default zero tensors and unnecessary array copies during serialization. Preserve the existing format and optimizer resume behavior; prioritize using actual checkpoint cost. |
+
+Mixed vector/matrix autograd support is also unfinished, but is a correctness/API
+coverage task rather than a performance optimization; track it separately.
+
+## How to maintain this tracker
+
+1. Select an ID and change its status to In progress. Record a blocker if work stops.
+2. Keep a reference path and run relevant checks on both JAVA and VECTOR backends.
+3. For numerical changes, include gradient checks, explicit tolerances and convergence
+   checks; for mutable buffers, include overlapping-view and graph-lifetime cases.
+4. Compare the same shapes, seeds, JDK, heap and benchmark settings before and after.
+   Report runtime and allocations; validate kernel gains against complete workloads.
+5. Link the implementation commit and result document in the row before marking Done.
+   Update the evidence and next-work recommendation when the profile changes.

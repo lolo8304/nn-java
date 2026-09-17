@@ -46,9 +46,8 @@ public final class SGD implements Optimizer {
     public void step(List<Parameter> ps) {
         for (Parameter p : ps) {
             if (p.grad() == null) continue;
-            Tensor v = velocity.computeIfAbsent(p, ignored -> Tensor.zeros(p.value().shape())).multiply(momentum).subtract(p.grad().multiply(lr));
-            velocity.put(p, v);
-            p.applyDelta(v);
+            Tensor v = velocity.computeIfAbsent(p, ignored -> Tensor.zeros(p.value().shape()));
+            p.value().sgdStep(p.grad(), v, lr, momentum);
         }
     }
 

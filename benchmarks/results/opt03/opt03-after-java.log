@@ -1,0 +1,190 @@
+> Task :tensor:compileJava UP-TO-DATE
+> Task :nn:compileJava UP-TO-DATE
+> Task :benchmarks:compileJava UP-TO-DATE
+> Task :benchmarks:processResources NO-SOURCE
+> Task :benchmarks:classes UP-TO-DATE
+> Task :nn:processResources NO-SOURCE
+> Task :nn:classes UP-TO-DATE
+> Task :nn:jar UP-TO-DATE
+> Task :tensor:processResources NO-SOURCE
+> Task :tensor:classes UP-TO-DATE
+> Task :tensor:jar UP-TO-DATE
+
+> Task :benchmarks:training
+Backend: JAVA; Java: 26.0.2
+WARNING: A terminally deprecated method in sun.misc.Unsafe has been called
+WARNING: sun.misc.Unsafe::objectFieldOffset has been called by org.openjdk.jmh.util.Utils (file:/Users/Lolo/.gradle/caches/modules-2/files-2.1/org.openjdk.jmh/jmh-core/1.37/896f27e49105b35ea1964319c83d12082e7a79ef/jmh-core-1.37.jar)
+WARNING: Please consider reporting this to the maintainers of class org.openjdk.jmh.util.Utils
+WARNING: sun.misc.Unsafe::objectFieldOffset will be removed in a future release
+# JMH version: 1.37
+# VM version: JDK 26.0.2, OpenJDK 64-Bit Server VM, 26.0.2+10-55
+# VM invoker: /Users/Lolo/Library/Java/JavaVirtualMachines/openjdk-26.0.2/Contents/Home/bin/java
+# VM options: -Xms256m -Xmx512m -Dtensor.backend=java
+# Blackhole mode: compiler (auto-detected, use -Djmh.blackhole.autoDetect=false to disable)
+# Warmup: 3 iterations, 1 s each
+# Measurement: 5 iterations, 1 s each
+# Timeout: 10 min per iteration
+# Threads: 1 thread, will synchronize iterations
+# Benchmark mode: Average time, time/op
+# Benchmark: ch.lolo.benchmark.TrainingBenchmarks.trainingEpoch
+# Parameters: (batch = 32, features = 128, samples = 1024)
+
+# Run progress: 0.00% complete, ETA 00:00:16
+# Fork: 1 of 2
+WARNING: A terminally deprecated method in sun.misc.Unsafe has been called
+WARNING: sun.misc.Unsafe::objectFieldOffset has been called by org.openjdk.jmh.util.Utils (file:/Users/Lolo/.gradle/caches/modules-2/files-2.1/org.openjdk.jmh/jmh-core/1.37/896f27e49105b35ea1964319c83d12082e7a79ef/jmh-core-1.37.jar)
+WARNING: Please consider reporting this to the maintainers of class org.openjdk.jmh.util.Utils
+WARNING: sun.misc.Unsafe::objectFieldOffset will be removed in a future release
+# Warmup Iteration   1: 8.421 ms/op
+# Warmup Iteration   2: 7.547 ms/op
+# Warmup Iteration   3: 7.623 ms/op
+Iteration   1: 7.550 ms/op
+                 gc.alloc.rate:      2565.506 MB/sec
+                 gc.alloc.rate.norm: 20482295.820 B/op
+                 gc.count:           17.000 counts
+                 gc.time:            6.000 ms
+
+Iteration   2: 7.631 ms/op
+                 gc.alloc.rate:      2537.303 MB/sec
+                 gc.alloc.rate.norm: 20482378.545 B/op
+                 gc.count:           17.000 counts
+                 gc.time:            6.000 ms
+
+Iteration   3: 7.610 ms/op
+                 gc.alloc.rate:      2545.782 MB/sec
+                 gc.alloc.rate.norm: 20482296.060 B/op
+                 gc.count:           17.000 counts
+                 gc.time:            6.000 ms
+
+Iteration   4: 7.614 ms/op
+                 gc.alloc.rate:      2548.869 MB/sec
+                 gc.alloc.rate.norm: 20482425.091 B/op
+                 gc.count:           17.000 counts
+                 gc.time:            7.000 ms
+
+Iteration   5: 7.506 ms/op
+                 gc.alloc.rate:      2580.643 MB/sec
+                 gc.alloc.rate.norm: 20482982.806 B/op
+                 gc.count:           17.000 counts
+                 gc.time:            7.000 ms
+
+
+# Run progress: 50.00% complete, ETA 00:00:08
+# Fork: 2 of 2
+WARNING: A terminally deprecated method in sun.misc.Unsafe has been called
+WARNING: sun.misc.Unsafe::objectFieldOffset has been called by org.openjdk.jmh.util.Utils (file:/Users/Lolo/.gradle/caches/modules-2/files-2.1/org.openjdk.jmh/jmh-core/1.37/896f27e49105b35ea1964319c83d12082e7a79ef/jmh-core-1.37.jar)
+WARNING: Please consider reporting this to the maintainers of class org.openjdk.jmh.util.Utils
+WARNING: sun.misc.Unsafe::objectFieldOffset will be removed in a future release
+# Warmup Iteration   1: 8.580 ms/op
+# Warmup Iteration   2: 7.555 ms/op
+# Warmup Iteration   3: 7.500 ms/op
+Iteration   1: 7.465 ms/op
+                 gc.alloc.rate:      2594.239 MB/sec
+                 gc.alloc.rate.norm: 20482134.756 B/op
+                 gc.count:           18.000 counts
+                 gc.time:            6.000 ms
+
+Iteration   2: 7.577 ms/op
+                 gc.alloc.rate:      2555.600 MB/sec
+                 gc.alloc.rate.norm: 20482296.060 B/op
+                 gc.count:           17.000 counts
+                 gc.time:            7.000 ms
+
+Iteration   3: 7.546 ms/op
+                 gc.alloc.rate:      2566.094 MB/sec
+                 gc.alloc.rate.norm: 20482296.060 B/op
+                 gc.count:           17.000 counts
+                 gc.time:            6.000 ms
+
+Iteration   4: 7.498 ms/op
+                 gc.alloc.rate:      2582.869 MB/sec
+                 gc.alloc.rate.norm: 20482277.851 B/op
+                 gc.count:           17.000 counts
+                 gc.time:            7.000 ms
+
+Iteration   5: 7.585 ms/op
+                 gc.alloc.rate:      2556.521 MB/sec
+                 gc.alloc.rate.norm: 20482982.567 B/op
+                 gc.count:           18.000 counts
+                 gc.time:            7.000 ms
+
+
+
+Result "ch.lolo.benchmark.TrainingBenchmarks.trainingEpoch":
+  7.558 ±(99.9%) 0.083 ms/op [Average]
+  (min, avg, max) = (7.465, 7.558, 7.631), stdev = 0.055
+  CI (99.9%): [7.475, 7.642] (assumes normal distribution)
+
+Secondary result "ch.lolo.benchmark.TrainingBenchmarks.trainingEpoch:gc.alloc.rate":
+  2563.343 ±(99.9%) 27.371 MB/sec [Average]
+  (min, avg, max) = (2537.303, 2563.343, 2594.239), stdev = 18.104
+  CI (99.9%): [2535.972, 2590.714] (assumes normal distribution)
+
+Secondary result "ch.lolo.benchmark.TrainingBenchmarks.trainingEpoch:gc.alloc.rate.norm":
+  20482436.562 ±(99.9%) 449.425 B/op [Average]
+  (min, avg, max) = (20482134.756, 20482436.562, 20482982.806), stdev = 297.267
+  CI (99.9%): [20481987.136, 20482885.987] (assumes normal distribution)
+
+Secondary result "ch.lolo.benchmark.TrainingBenchmarks.trainingEpoch:gc.count":
+  172.000 ±(99.9%) 0.001 counts [Sum]
+  (min, avg, max) = (17.000, 17.200, 18.000), stdev = 0.422
+  CI (99.9%): [172.000, 172.000] (assumes normal distribution)
+
+Secondary result "ch.lolo.benchmark.TrainingBenchmarks.trainingEpoch:gc.time":
+  65.000 ±(99.9%) 0.001 ms [Sum]
+  (min, avg, max) = (6.000, 6.500, 7.000), stdev = 0.527
+  CI (99.9%): [65.000, 65.000] (assumes normal distribution)
+
+
+# Run complete. Total time: 00:00:16
+
+REMEMBER: The numbers below are just data. To gain reusable insights, you need to follow up on
+why the numbers are the way they are. Use profilers (see -prof, -lprof), design factorial
+experiments, perform baseline and negative tests that provide experimental control, make sure
+the benchmarking environment is safe on JVM/OS/HW level, ask for reviews from the domain experts.
+Do not assume the numbers tell you what you want them to tell.
+
+NOTE: Current JVM experimentally supports Compiler Blackholes, and they are in use. Please exercise
+extra caution when trusting the results, look into the generated code to check the benchmark still
+works, and factor in a small probability of new VM bugs. Additionally, while comparisons between
+different JVMs are already problematic, the performance difference caused by different Blackhole
+modes can be very significant. Please make sure you use the consistent Blackhole mode for comparisons.
+
+Benchmark                                            (batch)  (features)  (samples)  Mode  Cnt         Score     Error   Units
+TrainingBenchmarks.trainingEpoch                          32         128       1024  avgt   10         7.558 ±   0.083   ms/op
+TrainingBenchmarks.trainingEpoch:gc.alloc.rate            32         128       1024  avgt   10      2563.343 ±  27.371  MB/sec
+TrainingBenchmarks.trainingEpoch:gc.alloc.rate.norm       32         128       1024  avgt   10  20482436.562 ± 449.425    B/op
+TrainingBenchmarks.trainingEpoch:gc.count                 32         128       1024  avgt   10       172.000            counts
+TrainingBenchmarks.trainingEpoch:gc.time                  32         128       1024  avgt   10        65.000                ms
+
+Benchmark result is saved to benchmarks/build/results/opt03-after-java.json
+
+> Task :benchmarks:profile
+Backend=JAVA Java=26.0.2 samples=1024 features=128 batch=32 warmup=5 runs=3 epochs/run=5
+Synthetic regression, Dense(features,64)/ReLU/Dense(64,10), MSE, Adam. No augmentation, validation, logging or checkpoint IO in timing.
+Run 1: 10.359 ms/epoch, 98854 samples/s, 20499594 bytes/epoch, GC=1 collections/1 ms, loss=0.01980394
+  load/shuffle           2.429 ms/epoch   23.5%      8226149 bytes/epoch
+  zero gradients         0.021 ms/epoch    0.2%         1024 bytes/epoch
+  forward + loss         3.743 ms/epoch   36.1%      2012165 bytes/epoch
+  backward               3.762 ms/epoch   36.3%     10254336 bytes/epoch
+  optimizer              0.324 ms/epoch    3.1%         5120 bytes/epoch
+  Percentages exclude loop/instrumentation overhead; allocation counters cover this thread only.
+Run 2: 7.770 ms/epoch, 131789 samples/s, 20499032 bytes/epoch, GC=0 collections/0 ms, loss=0.01980394
+  load/shuffle           1.768 ms/epoch   22.7%      8226136 bytes/epoch
+  zero gradients         0.004 ms/epoch    0.1%         1024 bytes/epoch
+  forward + loss         2.458 ms/epoch   31.6%      2011648 bytes/epoch
+  backward               3.215 ms/epoch   41.4%     10254336 bytes/epoch
+  optimizer              0.288 ms/epoch    3.7%         5120 bytes/epoch
+  Percentages exclude loop/instrumentation overhead; allocation counters cover this thread only.
+Run 3: 7.614 ms/epoch, 134488 samples/s, 20486744 bytes/epoch, GC=0 collections/0 ms, loss=0.01980394
+  load/shuffle           1.766 ms/epoch   23.2%      8226136 bytes/epoch
+  zero gradients         0.004 ms/epoch    0.0%         1024 bytes/epoch
+  forward + loss         2.403 ms/epoch   31.6%      1999360 bytes/epoch
+  backward               3.137 ms/epoch   41.2%     10254336 bytes/epoch
+  optimizer              0.269 ms/epoch    3.5%         5120 bytes/epoch
+  Percentages exclude loop/instrumentation overhead; allocation counters cover this thread only.
+Epoch ms across runs: min=7.614 median=7.770 max=10.359
+
+BUILD SUCCESSFUL in 18s
+7 actionable tasks: 2 executed, 5 up-to-date
+Consider enabling configuration cache to speed up this build: https://docs.gradle.org/9.7.1/userguide/configuration_cache_enabling.html

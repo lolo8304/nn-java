@@ -41,6 +41,36 @@ final class VectorKernels {
             out[outputOffset + i] = scalarFirst ? op.applyAsDouble(value, a[offset + i]) : op.applyAsDouble(a[offset + i], value);
     }
 
+    // Return the vectorized prefix length; Tensor handles the scalar tail.
+    static int sgd(double[] p, int po, double[] g, int go, double[] v, int vo,
+                   int length, double lr, double momentum) {
+        int bound = SPECIES.loopBound(length);
+        for (int i = 0; i < bound; i += SPECIES.length()) {
+            var grad = DoubleVector.fromArray(SPECIES, g, go + i);
+            var parameter = DoubleVector.fromArray(SPECIES, p, po + i);
+            var next = DoubleVector.fromArray(SPECIES, v, vo + i).mul(momentum).sub(grad.mul(lr));
+            next.intoArray(v, vo + i);
+            parameter.add(next).intoArray(p, po + i);
+        }
+        return bound;
+    }
+
+    static int adam(double[] p, int po, double[] g, int go, double[] m, int mo, double[] v, int vo,
+                    int length, double lr, double b1, double b2, double c1, double c2, double eps) {
+        int bound = SPECIES.loopBound(length);
+        for (int i = 0; i < bound; i += SPECIES.length()) {
+            var grad = DoubleVector.fromArray(SPECIES, g, go + i);
+            var parameter = DoubleVector.fromArray(SPECIES, p, po + i);
+            var first = DoubleVector.fromArray(SPECIES, m, mo + i).mul(b1).add(grad.mul(1 - b1));
+            var second = DoubleVector.fromArray(SPECIES, v, vo + i).mul(b2).add(grad.mul(grad).mul(1 - b2));
+            var delta = first.div(c1).mul(-lr).div(second.div(c2).sqrt().add(eps));
+            first.intoArray(m, mo + i);
+            second.intoArray(v, vo + i);
+            parameter.add(delta).intoArray(p, po + i);
+        }
+        return bound;
+    }
+
     static void relu(double[] a, int offset, double[] out, int outputOffset, int length) {
         int i = 0, bound = SPECIES.loopBound(length);
         for (; i < bound; i += SPECIES.length())

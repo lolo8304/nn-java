@@ -425,6 +425,78 @@ public final class Tensor {
     /** Writes this / scalar into a same-shaped destination. */
     public Tensor divideInto(double scalar, Tensor destination) { return scalarInto(scalar, destination, BinaryOp.DIVIDE, false); }
 
+    /**
+     * Updates velocity = momentum * velocity - gradient * learningRate, then adds it
+     * to this parameter tensor. All tensors must have exactly the same shape.
+     * Writable storage address ranges must be disjoint; gradient aliases have snapshot semantics.
+     * Returns this tensor. No element-sized temporary storage is needed for disjoint inputs.
+     */
+    public Tensor sgdStep(Tensor gradient, Tensor velocity, double learningRate, double momentum) {
+        requireShape(gradient, shape);
+        requireShape(velocity, shape);
+        requireDisjoint(this, velocity);
+        Tensor g = gradient.safeInput(this).safeInput(velocity);
+        int length = (int) size(), start = 0;
+        boolean contiguous = isContiguous() && g.isContiguous() && velocity.isContiguous();
+        if (contiguous && backend == TensorBackend.VECTOR)
+            start = VectorKernels.sgd(data, offset, g.data, g.offset, velocity.data, velocity.offset,
+                    length, learningRate, momentum);
+        int[] index = contiguous ? null : new int[rank()];
+        for (int i = start; i < length; i++) {
+            int pi = contiguous ? offset + i : broadcastAddress(index);
+            int gi = contiguous ? g.offset + i : g.broadcastAddress(index);
+            int vi = contiguous ? velocity.offset + i : velocity.broadcastAddress(index);
+            double next = velocity.data[vi] * momentum - g.data[gi] * learningRate;
+            velocity.data[vi] = next;
+            data[pi] += next;
+            if (!contiguous) advance(index, shape);
+        }
+        return this;
+    }
+
+    /**
+     * Updates Adam's first/second moments and this parameter in one traversal.
+     * correction1/2 are 1 - beta1/2^step; epsilon is outside the square root.
+     * Shapes must match exactly and the three writable storage address ranges must be disjoint.
+     * Gradient aliases have snapshot semantics. Returns this tensor.
+     */
+    public Tensor adamStep(Tensor gradient, Tensor first, Tensor second, double learningRate,
+                           double beta1, double beta2, double correction1, double correction2, double epsilon) {
+        requireShape(gradient, shape);
+        requireShape(first, shape);
+        requireShape(second, shape);
+        requireDisjoint(this, first);
+        requireDisjoint(this, second);
+        requireDisjoint(first, second);
+        Tensor g = gradient.safeInput(this).safeInput(first).safeInput(second);
+        int length = (int) size(), start = 0;
+        boolean contiguous = isContiguous() && g.isContiguous() && first.isContiguous() && second.isContiguous();
+        if (contiguous && backend == TensorBackend.VECTOR)
+            start = VectorKernels.adam(data, offset, g.data, g.offset, first.data, first.offset,
+                    second.data, second.offset, length, learningRate, beta1, beta2, correction1, correction2, epsilon);
+        int[] index = contiguous ? null : new int[rank()];
+        for (int i = start; i < length; i++) {
+            int pi = contiguous ? offset + i : broadcastAddress(index);
+            int gi = contiguous ? g.offset + i : g.broadcastAddress(index);
+            int mi = contiguous ? first.offset + i : first.broadcastAddress(index);
+            int vi = contiguous ? second.offset + i : second.broadcastAddress(index);
+            double grad = g.data[gi];
+            double m = first.data[mi] * beta1 + grad * (1 - beta1);
+            double v = second.data[vi] * beta2 + (grad * grad) * (1 - beta2);
+            first.data[mi] = m;
+            second.data[vi] = v;
+            data[pi] += -learningRate * (m / correction1) / (Math.sqrt(v / correction2) + epsilon);
+            if (!contiguous) advance(index, shape);
+        }
+        return this;
+    }
+
+    private static void requireDisjoint(Tensor a, Tensor b) {
+        if (a.data == b.data && a.size() != 0 && b.size() != 0
+                && a.offset <= b.lastAddress() && b.offset <= a.lastAddress())
+            throw new IllegalArgumentException("optimizer outputs must have disjoint storage ranges");
+    }
+
     public Tensor add(Tensor b) {
         return bin(b, BinaryOp.ADD);
     }

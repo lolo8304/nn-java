@@ -87,7 +87,7 @@ public class MnistExample {
                     }
                 }
             }
-            if (epochs == null) epochs = resume == null ? 50 : 20;
+            if (epochs == null) epochs = resume == null ? 80 : 30;
             if (epochs < 1) throw new IllegalArgumentException("Epochs must be positive");
             if (output == null) output = Path.of(resume == null ? "mnist.nn" : "mnist-finetuned.nn");
             if (resume != null && (resume.toAbsolutePath().normalize().equals(output.toAbsolutePath().normalize())

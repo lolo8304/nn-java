@@ -56,12 +56,9 @@ public final class Adam implements Optimizer {
         for (Parameter p : ps) {
             Tensor g = p.grad();
             if (g == null) continue;
-            Tensor mm = m.computeIfAbsent(p, ignored -> Tensor.zeros(g.shape())).multiply(b1).add(g.multiply(1 - b1));
-            Tensor vv = v.computeIfAbsent(p, ignored -> Tensor.zeros(g.shape())).multiply(b2).add(g.pow(2).multiply(1 - b2));
-            m.put(p, mm);
-            v.put(p, vv);
-            Tensor delta = Tensor.generate(i -> -lr * (mm.get(i) / c1) / (Math.sqrt(vv.get(i) / c2) + eps), g.shape());
-            p.applyDelta(delta);
+            Tensor mm = m.computeIfAbsent(p, ignored -> Tensor.zeros(g.shape()));
+            Tensor vv = v.computeIfAbsent(p, ignored -> Tensor.zeros(g.shape()));
+            p.value().adamStep(g, mm, vv, lr, b1, b2, c1, c2, eps);
         }
     }
 
