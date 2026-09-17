@@ -85,7 +85,7 @@ final class VectorKernels {
         matmul(a, ao, rowStride, innerStride, b, bo, rightRowStride, out, 0, n, m, k, n);
     }
 
-    private static void matmul(double[] a, int ao, int rowStride, int innerStride,
+    static void matmul(double[] a, int ao, int rowStride, int innerStride,
                                double[] b, int bo, int rightRowStride,
                                double[] out, int outputOffset, int outputRowStride, int m, int k, int n) {
         int bound = SPECIES.loopBound(n);

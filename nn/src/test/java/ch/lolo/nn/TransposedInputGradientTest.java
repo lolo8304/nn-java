@@ -30,4 +30,29 @@ class TransposedInputGradientTest {
             optimizer.step(List.of(weights));
         }
     }
+
+    @Test
+    void blockedProductsMatchInputAndWeightFiniteDifferences() {
+        // All three products cross the blocking threshold, including both transposes.
+        Tensor x = Tensor.random(41L, -0.5, 0.5, 257, 257);
+        var weights = new Parameter(Tensor.random(42L, -0.5, 0.5, 257, 129));
+        var input = Variable.parameter(x);
+        input.matmul(weights).pow(2).mean().backward();
+        for (boolean checkInput : new boolean[]{true, false}) {
+            Tensor value = checkInput ? x : weights.value();
+            Tensor gradient = checkInput ? input.grad() : weights.grad();
+            for (int[] index : new int[][]{{0, 0}, {64, 64},
+                    {value.shape()[0] - 1, value.shape()[1] - 1}}) {
+                int row = index[0], col = index[1];
+                double original = value.get(row, col), h = 1e-5;
+                value.set(original + h, row, col);
+                double plus = x.matmul(weights.value()).pow(2).mean().scalar();
+                value.set(original - h, row, col);
+                double minus = x.matmul(weights.value()).pow(2).mean().scalar();
+                value.set(original, row, col);
+                assertEquals((plus - minus) / (2 * h), gradient.get(row, col), 1e-8);
+            }
+        }
+    }
+
 }
