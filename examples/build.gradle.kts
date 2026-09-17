@@ -36,6 +36,16 @@ tasks.register<JavaExec>("runMnist") {
     workingDir(rootProject.projectDir)
 }
 
+tasks.register<JavaExec>("runMnist80") {
+    group = "application"
+    description = "Runs the MNIST neural network example"
+
+    classpath = sourceSets.main.get().runtimeClasspath
+    mainClass.set("ch.lolo.examples.MnistExample")
+    args("--epochs", "80")
+    workingDir(rootProject.projectDir)
+}
+
 // Custom run tasks must use the project toolchain, not the Gradle daemon JVM.
 tasks.withType<JavaExec>().configureEach {
     javaLauncher.set(javaToolchains.launcherFor(java.toolchain))
