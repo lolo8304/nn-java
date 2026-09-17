@@ -17,7 +17,7 @@ tasks.withType<JavaExec>().configureEach {
     workingDir(rootProject.projectDir)
 }
 
-for (kind in listOf("kernel", "training")) {
+for (kind in listOf("kernel", "training", "inference")) {
     tasks.register<JavaExec>(kind) {
         group = "benchmark"
         description = "Runs forked JMH $kind benchmarks with allocation and GC profiling"

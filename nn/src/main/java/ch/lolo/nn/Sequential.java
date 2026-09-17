@@ -1,5 +1,6 @@
 package ch.lolo.nn;
 
+import ch.lolo.nn.autograd.GradMode;
 import ch.lolo.nn.autograd.Variable;
 import ch.lolo.nn.data.Batch;
 import ch.lolo.nn.data.DataLoader;
@@ -46,14 +47,16 @@ public final class Sequential {
         return this;
     }
 
+    /** Layer training mode (for example dropout) is independent of GradMode recording. */
     public Variable forward(Variable x, boolean training) {
         Variable v = x;
         for (Layer l : layers) v = l.forward(v, training);
         return v;
     }
 
+    /** Predicts with training behavior and autograd recording disabled. */
     public Tensor predict(Tensor x) {
-        return forward(Variable.of(x), false).value();
+        return GradMode.noGrad(() -> forward(Variable.of(x), false).value());
     }
 
     public Tensor predictClasses(Tensor x) {
@@ -176,8 +179,12 @@ public final class Sequential {
     /** Sample-weighted loss and classification accuracy; accuracy is NaN for non-classification shapes. */
     public record Evaluation(double loss, double accuracy) {}
 
-    /** Evaluates using the compiled loss with dropout disabled and without updating weights or optimizer state. */
+    /** Evaluates with dropout and graph recording disabled, preserving weights, gradients and optimizer state. */
     public Evaluation evaluate(Dataset data, int batchSize) {
+        return GradMode.noGrad(() -> evaluateWithoutGrad(data, batchSize));
+    }
+
+    private Evaluation evaluateWithoutGrad(Dataset data, int batchSize) {
         if (loss == null) throw new IllegalStateException("compile first");
         if (data.size() == 0) throw new IllegalArgumentException("Cannot evaluate an empty dataset");
         double totalLoss = 0, totalAccuracy = 0;

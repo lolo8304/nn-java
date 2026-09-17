@@ -13,8 +13,7 @@ public class Variable {
     private Tensor grad;
 
     public Variable(Tensor value, boolean requiresGrad) {
-        this(value, requiresGrad, List.of(), g -> {
-        });
+        this(value, requiresGrad, List.of(), null);
     }
 
     private Variable(Tensor v, boolean r, List<Variable> p, Consumer<Tensor> b) {
@@ -32,14 +31,17 @@ public class Variable {
         return new Variable(t, true);
     }
 
-    private static boolean req(Variable... v) {
-        for (var x : v) if (x.requiresGrad) return true;
-        return false;
+    private boolean recordsGrad() {
+        return requiresGrad && GradMode.isEnabled();
     }
 
+    private boolean recordsGrad(Variable other) {
+        return (requiresGrad || other.requiresGrad) && GradMode.isEnabled();
+    }
+
+    // Callers must check recordsGrad before constructing the parent list and closure.
     private static Variable node(Tensor v, List<Variable> p, Consumer<Tensor> b) {
-        boolean r = p.stream().anyMatch(Variable::requiresGrad);
-        return new Variable(v, r, p, b);
+        return new Variable(v, true, p, b);
     }
 
     private static void build(Variable v, Set<Variable> s, List<Variable> o) {
@@ -70,7 +72,9 @@ public class Variable {
 
     public Variable add(Variable b) {
         Variable a = this;
-        return node(value.add(b.value), List.of(a, b), g -> {
+        Tensor out = value.add(b.value);
+        if (!recordsGrad(b)) return of(out);
+        return node(out, List.of(a, b), g -> {
             if (a.requiresGrad) a.addGrad(TensorOps.unbroadcast(g, a.value.shape()));
             if (b.requiresGrad) b.addGrad(TensorOps.unbroadcast(g, b.value.shape()));
         });
@@ -86,7 +90,9 @@ public class Variable {
 
     public Variable subtract(Variable b) {
         Variable a = this;
-        return node(value.subtract(b.value), List.of(a, b), g -> {
+        Tensor out = value.subtract(b.value);
+        if (!recordsGrad(b)) return of(out);
+        return node(out, List.of(a, b), g -> {
             if (a.requiresGrad) a.addGrad(TensorOps.unbroadcast(g, a.value.shape()));
             if (b.requiresGrad) b.addGrad(TensorOps.unbroadcast(g.negate(), b.value.shape()));
         });
@@ -94,7 +100,9 @@ public class Variable {
 
     public Variable multiply(Variable b) {
         Variable a = this;
-        return node(value.multiply(b.value), List.of(a, b), g -> {
+        Tensor out = value.multiply(b.value);
+        if (!recordsGrad(b)) return of(out);
+        return node(out, List.of(a, b), g -> {
             if (a.requiresGrad) a.addGrad(TensorOps.unbroadcast(g.multiply(b.value), a.value.shape()));
             if (b.requiresGrad) b.addGrad(TensorOps.unbroadcast(g.multiply(a.value), b.value.shape()));
         });
@@ -106,7 +114,9 @@ public class Variable {
 
     public Variable divide(Variable b) {
         Variable a = this;
-        return node(value.divide(b.value), List.of(a, b), g -> {
+        Tensor out = value.divide(b.value);
+        if (!recordsGrad(b)) return of(out);
+        return node(out, List.of(a, b), g -> {
             if (a.requiresGrad) a.addGrad(TensorOps.unbroadcast(g.divide(b.value), a.value.shape()));
             if (b.requiresGrad) b.addGrad(TensorOps.unbroadcast(g.multiply(a.value).divide(b.value.pow(2)).negate(), b.value.shape()));
         });
@@ -115,6 +125,7 @@ public class Variable {
     public Variable matmul(Variable b) {
         Variable a = this;
         Tensor out = value.matmul(b.value);
+        if (!recordsGrad(b)) return of(out);
         return node(out, List.of(a, b), g -> {
             if (a.value.rank() == 2 && b.value.rank() == 2) {
                 if (a.requiresGrad) a.addGrad(g.matmul(b.value.transpose()));
@@ -133,52 +144,64 @@ public class Variable {
 
     public Variable sum() {
         Variable a = this;
-        return node(value.sum(), List.of(a), g -> a.addGrad(TensorOps.onesLike(a.value).multiply(g.scalar())));
+        Tensor out = value.sum();
+        if (!recordsGrad()) return of(out);
+        return node(out, List.of(a), g -> a.addGrad(TensorOps.onesLike(a.value).multiply(g.scalar())));
     }
 
     public Variable mean() {
         Variable a = this;
-        return node(value.mean(), List.of(a), g -> a.addGrad(TensorOps.onesLike(a.value).multiply(g.scalar() / a.value.size())));
+        Tensor out = value.mean();
+        if (!recordsGrad()) return of(out);
+        return node(out, List.of(a), g -> a.addGrad(TensorOps.onesLike(a.value).multiply(g.scalar() / a.value.size())));
     }
 
     public Variable pow(double p) {
         Variable a = this;
-        return node(value.pow(p), List.of(a), g -> a.addGrad(g.multiply(a.value.pow(p - 1)).multiply(p)));
+        Tensor out = value.pow(p);
+        if (!recordsGrad()) return of(out);
+        return node(out, List.of(a), g -> a.addGrad(g.multiply(a.value.pow(p - 1)).multiply(p)));
     }
 
     public Variable log() {
         Variable a = this;
         Tensor y = TensorOps.map(value, Math::log);
+        if (!recordsGrad()) return of(y);
         return node(y, List.of(a), g -> a.addGrad(g.divide(a.value)));
     }
 
     public Variable relu() {
         Variable a = this;
         Tensor y = value.relu();
+        if (!recordsGrad()) return of(y);
         return node(y, List.of(a), g -> a.addGrad(g.multiply(Tensor.generate(i -> a.value.get(i) > 0 ? 1 : 0, a.value.shape()))));
     }
 
     public Variable sigmoid() {
         Variable a = this;
         Tensor y = value.sigmoid();
+        if (!recordsGrad()) return of(y);
         return node(y, List.of(a), g -> a.addGrad(g.multiply(y.multiply(Tensor.ones(y.shape()).subtract(y)))));
     }
 
     public Variable tanh() {
         Variable a = this;
         Tensor y = TensorOps.map(value, Math::tanh);
+        if (!recordsGrad()) return of(y);
         return node(y, List.of(a), g -> a.addGrad(g.multiply(Tensor.ones(y.shape()).subtract(y.pow(2)))));
     }
 
     public Variable leakyRelu(double alpha) {
         Variable a = this;
         Tensor y = TensorOps.map(value, x -> x >= 0 ? x : alpha * x);
+        if (!recordsGrad()) return of(y);
         return node(y, List.of(a), g -> a.addGrad(g.multiply(Tensor.generate(i -> a.value.get(i) >= 0 ? 1 : alpha, a.value.shape()))));
     }
 
     public Variable reshape(int... s) {
         Variable a = this;
         Tensor y = value.reshape(s);
+        if (!recordsGrad()) return of(y);
         return node(y, List.of(a), g -> a.addGrad(g.reshape(a.value.shape())));
     }
 
@@ -189,12 +212,14 @@ public class Variable {
     public Variable transpose() {
         Variable a = this;
         Tensor y = value.transpose();
+        if (!recordsGrad()) return of(y);
         return node(y, List.of(a), g -> a.addGrad(g.transpose()));
     }
 
     public Variable softmax(int axis) {
         Variable a = this;
         Tensor y = value.softmax(axis);
+        if (!recordsGrad()) return of(y);
         return node(y, List.of(a), g -> {
             int ax = axis < 0 ? axis + y.rank() : axis;
             Tensor dx = Tensor.zeros(y.shape());
@@ -234,7 +259,7 @@ public class Variable {
         addGrad(seed);
         for (int i = topo.size() - 1; i >= 0; i--) {
             Variable v = topo.get(i);
-            if (v.grad != null) v.backwardFn.accept(v.grad);
+            if (v.grad != null && v.backwardFn != null) v.backwardFn.accept(v.grad);
         }
     }
 }

@@ -17,7 +17,11 @@ public final class BenchmarkRunner {
         var cli = new CommandLineOptions(args);
         var options = new OptionsBuilder().parent(cli);
         if (cli.getIncludes().isEmpty())
-            options.include(kind.equals("training") ? ".*TrainingBenchmarks.*" : ".*KernelBenchmarks.*");
+            options.include(switch (kind) {
+                case "training" -> ".*TrainingBenchmarks.*";
+                case "inference" -> ".*InferenceBenchmarks.*";
+                default -> ".*KernelBenchmarks.*";
+            });
         if (!cli.getForkCount().hasValue()) options.forks(2);
         if (!cli.getWarmupIterations().hasValue()) options.warmupIterations(3);
         if (!cli.getWarmupTime().hasValue()) options.warmupTime(TimeValue.seconds(1));

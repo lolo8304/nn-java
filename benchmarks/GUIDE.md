@@ -114,3 +114,20 @@ Open the recording in a JFR viewer such as JDK Mission Control. Profiling sample
 and post-GC heap observations are not an exact peak-live-memory measurement.
 Keep profiling recordings separate from clean timing comparisons and avoid running
 other benchmarks or training processes at the same time.
+
+## Inference
+
+```bash
+./gradlew :benchmarks:inference
+./gradlew :benchmarks:inference -PtensorBackend=java
+```
+
+Each operation predicts one batch through Dense(features,64), ReLU, Dropout(.2),
+and Dense(64,10). Prediction disables dropout. The sweep covers 128 and 784 features
+with batch sizes 1 and 32. Seeded model/input construction occurs once per trial,
+outside timing. JMH consumes the returned tensor; this includes the public prediction
+path and all forward allocations, but excludes loading, metrics, and checkpoint IO.
+Defaults match the kernel/training forks, warmup, measurements, heap and GC profiler.
+Time is microseconds per prediction batch; normalized allocation is bytes per batch.
+Results default to `benchmarks/build/results/inference-vector.json` or
+`inference-java.json`. Use `-rff` to preserve comparisons.

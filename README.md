@@ -51,6 +51,21 @@ System.out.println(x.grad().scalar()); // 6.0
 
 Leaf gradients accumulate until `zeroGrad()` is called. Intermediate gradients are recomputed on each backward pass. `Optimizer.zeroGrad(parameters)` handles leaf resets during training.
 
+`predict`, `predictClasses`, and `evaluate` disable autograd recording automatically.
+For custom computations, use the exception-safe, thread-local scope:
+
+```java
+Variable result = GradMode.noGrad(() -> x.pow(2)); // import ch.lolo.nn.autograd.GradMode
+// result.requiresGrad() is false; x remains trainable and its gradient is unchanged.
+```
+
+Nested scopes restore the previous mode, including when an exception is thrown.
+Operations with no gradient-requiring inputs also omit graph bookkeeping.
+Recording is separate from layer training mode: `forward(input, false)` still
+supports differentiation, while `GradMode.noGrad(() -> model.forward(input, true))`
+still applies training-time dropout. Explicit parameter creation is unaffected,
+and existing recorded graphs can still be differentiated inside a no-grad scope.
+
 ## Layers
 
 `Dense`, `Flatten`, `Dropout`, `ReLU`, `LeakyReLU`, `Sigmoid`, `Tanh`, `Softmax`.
@@ -305,5 +320,6 @@ A native backend is not implemented here.
 
 Remaining boundaries: mixed vector/matrix matmul supports forward execution but not
 autograd; cross entropy currently smooths softmax probabilities rather than using a
-fused log-sum-exp loss; inference still builds autograd nodes for trainable parameters.
+fused log-sum-exp loss. Prediction and evaluation skip autograd recording;
+explicit forward calls retain independent control of recording and training mode.
 These are opportunities for a separate API/numerical change.
