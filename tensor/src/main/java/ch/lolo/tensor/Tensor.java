@@ -267,7 +267,10 @@ public final class Tensor {
     public Tensor copy() {
         Tensor t = alloc(shape);
         if (isContiguous()) System.arraycopy(data, offset, t.data, 0, t.data.length);
-        else TensorIterator.each(shape, i -> t.set(get(i), i));
+        else {
+            StrideCursor cursor = new StrideCursor(shape, strides, offset);
+            for (int i = 0; i < t.data.length; i++, cursor.advance()) t.data[i] = data[cursor.address];
+        }
         return t;
     }
 
@@ -276,7 +279,11 @@ public final class Tensor {
         Tensor t = alloc(shape);
         if (isContiguous()) {
             for (int i = 0; i < t.data.length; i++) t.data[i] = f.applyAsDouble(data[offset + i]);
-        } else TensorIterator.each(shape, i -> t.set(f.applyAsDouble(get(i)), i));
+        } else {
+            StrideCursor cursor = new StrideCursor(shape, strides, offset);
+            for (int i = 0; i < t.data.length; i++, cursor.advance())
+                t.data[i] = f.applyAsDouble(data[cursor.address]);
+        }
         return t;
     }
 
@@ -367,13 +374,51 @@ public final class Tensor {
                 VectorKernels.binary(left.data, left.offset + row * left.shape[1], right.data, right.offset,
                         destination.data, destination.offset + row * left.shape[1], left.shape[1], op);
         } else {
-            int[] index = new int[resultShape.length];
-            for (int i = 0; i < length; i++) {
-                destination.data[destination.broadcastAddress(index)] = op.applyAsDouble(
-                        left.data[left.broadcastAddress(index)], right.data[right.broadcastAddress(index)]);
-                advance(index, resultShape);
-            }
+            return broadcastInto(left, right, destination, op, vector, resultShape, length);
         }
+        return destination;
+    }
+
+    // Keep uncommon layouts out of binaryInto to limit the JIT impact of the
+    // larger arbitrary-rank dispatcher on existing common paths.
+    private static Tensor broadcastInto(Tensor left, Tensor right, Tensor destination, BinaryOp op,
+                                        boolean vector, int[] resultShape, int length) {
+        int last = resultShape.length - 1;
+        int ls = left.shape[left.rank() - 1] == 1 ? 0 : left.strides[left.rank() - 1];
+        int rs = right.shape[right.rank() - 1] == 1 ? 0 : right.strides[right.rank() - 1];
+        if (destination.isContiguous() && ls <= 1 && rs <= 1) {
+            int width = resultShape[last];
+            if (length == 0) return destination;
+            int[] outer = resultShape.clone();
+            outer[last] = 1;
+            StrideCursor lc = StrideCursor.broadcast(outer, left.shape, left.strides, left.offset);
+            StrideCursor rc = StrideCursor.broadcast(outer, right.shape, right.strides, right.offset);
+            for (int i = 0; i < length; i += width, lc.advance(), rc.advance()) {
+                if (!vector) {
+                    int leftBase = lc.address, rightBase = rc.address, outputBase = destination.offset + i;
+                    for (int j = 0; j < width; j++)
+                        destination.data[outputBase + j] = op.applyAsDouble(
+                                left.data[leftBase + j * ls], right.data[rightBase + j * rs]);
+                } else if (ls == 1 && rs == 1)
+                    VectorKernels.binary(left.data, lc.address, right.data, rc.address,
+                            destination.data, destination.offset + i, width, op);
+                else if (ls == 1)
+                    VectorKernels.scalar(left.data, lc.address, right.data[rc.address], false,
+                            destination.data, destination.offset + i, width, op);
+                else if (rs == 1)
+                    VectorKernels.scalar(right.data, rc.address, left.data[lc.address], true,
+                            destination.data, destination.offset + i, width, op);
+                else Arrays.fill(destination.data, destination.offset + i, destination.offset + i + width,
+                            op.applyAsDouble(left.data[lc.address], right.data[rc.address]));
+            }
+        } else {
+            StrideCursor lc = StrideCursor.broadcast(resultShape, left.shape, left.strides, left.offset);
+            StrideCursor rc = StrideCursor.broadcast(resultShape, right.shape, right.strides, right.offset);
+            StrideCursor dc = new StrideCursor(resultShape, destination.strides, destination.offset);
+            for (int i = 0; i < length; i++, lc.advance(), rc.advance(), dc.advance())
+                destination.data[dc.address] = op.applyAsDouble(left.data[lc.address], right.data[rc.address]);
+        }
+
         return destination;
     }
 
@@ -617,9 +662,27 @@ public final class Tensor {
         return destination;
     }
 
+    /**
+     * Elementwise sigmoid. Contiguous Vector inputs of at least 128 elements use
+     * Vector EXP; finite results may differ by a few ULPs from Java Math.exp.
+     */
     public Tensor sigmoid() {
+        if (backend == TensorBackend.VECTOR && isContiguous() && size() >= 128) {
+            Tensor out = alloc(shape);
+            VectorKernels.sigmoid(data, offset, out.data, out.data.length);
+            return out;
+        }
         return map(v -> 1 / (1 + Math.exp(-v)));
     }
+
+    /** Elementwise square; retains Java pow semantics. */
+    public Tensor square() { return pow(2); }
+
+    /** Elementwise hyperbolic tangent, evaluated with Math.tanh. */
+    public Tensor tanh() { return map(Math::tanh); }
+
+    /** Elementwise natural logarithm, evaluated with Math.log. */
+    public Tensor log() { return map(Math::log); }
 
     public Tensor matmul(Tensor b) {
         if (rank() == 0 || b.rank() == 0) throw new IllegalArgumentException("scalar matmul");
@@ -630,7 +693,7 @@ public final class Tensor {
         int[] ab = av ? new int[0] : Arrays.copyOf(shape, rank() - 2), bb = bv ? new int[0] : Arrays.copyOf(b.shape, b.rank() - 2), batch = TensorShape.broadcast(ab, bb);
         if (av && bv) {
             double s = 0;
-            for (int q = 0; q < k; q++) s += get(q) * b.get(q);
+            for (int q = 0; q < k; q++) s += data[offset + q * strides[0]] * b.data[b.offset + q * b.strides[0]];
             return scalar(s);
         }
         int[] os = new int[batch.length + (av ? 0 : 1) + (bv ? 0 : 1)];
@@ -639,22 +702,24 @@ public final class Tensor {
         if (!av) os[p++] = m;
         if (!bv) os[p] = n;
         Tensor out = alloc(os);
-        TensorIterator.each(os, oi -> {
-            int[] bi = Arrays.copyOf(oi, batch.length);
-            int row = av ? 0 : oi[batch.length], col = bv ? 0 : oi[oi.length - 1];
-            double s = 0;
-            for (int q = 0; q < k; q++) s += matGet(bi, row, q, av) * (bv ? b.get(q) : b.matGet(bi, q, col, false));
-            out.set(s, oi);
-        });
+        if (out.data.length == 0) return out;
+        StrideCursor ac = StrideCursor.broadcast(batch, ab, Arrays.copyOf(strides, ab.length), offset);
+        StrideCursor bc = StrideCursor.broadcast(batch, bb, Arrays.copyOf(b.strides, bb.length), b.offset);
+        int count = TensorShape.sizeOf(batch);
+        for (int i = 0; i < count; i++, ac.advance(), bc.advance())
+            matmulInto(b, ac.address, av ? 0 : strides[rank() - 2], strides[rank() - 1],
+                    bc.address, bv ? b.strides[0] : b.strides[b.rank() - 2], bv ? 0 : b.strides[b.rank() - 1],
+                    out.data, i * m * n, m, k, n);
         return out;
     }
 
-    // Direct stride arithmetic also supports transposed and sliced views used in backpropagation.
+    // Keep allocation and scalar rank-2 arithmetic together: HotSpot can prove
+    // output storage does not alias either input and auto-vectorize the Java loop.
     private Tensor matmul2d(Tensor b, int m, int k, int n) {
         Tensor out = alloc(m, n);
         if (MatmulKernels.shouldBlock(m, k, n)) {
             MatmulKernels.matmul(data, offset, strides[0], strides[1], b.data, b.offset,
-                    b.strides[0], b.strides[1], out.data, m, k, n, backend == TensorBackend.VECTOR);
+                    b.strides[0], b.strides[1], out.data, 0, m, k, n, backend == TensorBackend.VECTOR);
             return out;
         }
         if (backend == TensorBackend.VECTOR) {
@@ -666,7 +731,7 @@ public final class Tensor {
             // Amortize fresh panel packing across rows; small products keep the scalar path.
             if (m >= 4 && k >= 8 && n >= 16) {
                 VectorKernels.matmulPackedRight(data, offset, strides[0], strides[1], b.data, b.offset,
-                        b.strides[0], b.strides[1], out.data, m, k, n);
+                        b.strides[0], b.strides[1], out.data, 0, m, k, n);
                 return out;
             }
         }
@@ -696,107 +761,143 @@ public final class Tensor {
         return out;
     }
 
-    private double matGet(int[] batch, int row, int col, boolean vec) {
-        if (vec) return data[offset + col * strides[0]];
-        int br = rank() - 2, shift = batch.length - br, address = offset;
-        for (int x = 0; x < br; x++)
-            if (shape[x] != 1) address += batch[x + shift] * strides[x];
-        return data[address + row * strides[br] + col * strides[br + 1]];
+    // Output starts zeroed; each element accumulates q=0..k-1 without FMA.
+    private void matmulInto(Tensor b, int ao, int ars, int aks, int bo, int bks, int bcs,
+                            double[] out, int oo, int m, int k, int n) {
+        if (m == 0 || n == 0 || k == 0) return;
+        if (MatmulKernels.shouldBlock(m, k, n)) {
+            MatmulKernels.matmul(data, ao, ars, aks, b.data, bo, bks, bcs,
+                    out, oo, m, k, n, backend == TensorBackend.VECTOR);
+            return;
+        }
+        if (backend == TensorBackend.VECTOR) {
+            if (bcs == 1) {
+                VectorKernels.matmul(data, ao, ars, aks, b.data, bo, bks, out, oo, n, m, k, n);
+                return;
+            }
+            if (m >= 4 && k >= 8 && n >= 16) {
+                VectorKernels.matmulPackedRight(data, ao, ars, aks, b.data, bo, bks, bcs,
+                        out, oo, m, k, n);
+                return;
+            }
+        }
+        for (int row = 0; row < m; row++) {
+            int left = ao + row * ars, output = oo + row * n;
+            if (bcs == 1) {
+                for (int q = 0; q < k; q++) {
+                    double value = data[left + q * aks];
+                    int right = bo + q * bks;
+                    for (int col = 0; col < n; col++) out[output + col] += value * b.data[right + col];
+                }
+            } else {
+                for (int col = 0; col < n; col++) {
+                    double sum = 0;
+                    int right = bo + col * bcs;
+                    for (int q = 0; q < k; q++) sum += data[left + q * aks] * b.data[right + q * bks];
+                    out[output + col] = sum;
+                }
+            }
+        }
     }
 
+    /** Sums in logical row-major order, including on the Vector backend. */
     public Tensor sum() {
-        double[] s = {0};
+        double sum = 0;
         if (isContiguous()) {
-            int end = offset + (int) size();
-            for (int i = offset; i < end; i++) s[0] += data[i];
-        } else TensorIterator.each(shape, i -> s[0] += get(i));
-        return scalar(s[0]);
+            for (int i = 0, length = (int) size(); i < length; i++) sum += data[offset + i];
+        } else {
+            StrideCursor cursor = new StrideCursor(shape, strides, offset);
+            for (int i = 0, length = (int) size(); i < length; i++, cursor.advance()) sum += data[cursor.address];
+        }
+        return scalar(sum);
     }
 
     public Tensor mean() {
         return scalar(size() == 0 ? Double.NaN : sum().scalar() / size());
     }
 
-    public Tensor min() {
-        if (size() == 0) throw new IllegalStateException("empty");
-        double[] x = {Double.POSITIVE_INFINITY};
-        TensorIterator.each(shape, i -> x[0] = Math.min(x[0], get(i)));
-        return scalar(x[0]);
+    public Tensor min() { return extrema(true); }
+
+    public Tensor max() { return extrema(false); }
+
+    private Tensor extrema(boolean min) {
+        int length = (int) size();
+        if (length == 0) throw new IllegalStateException("empty");
+        if (isContiguous()) {
+            if (backend == TensorBackend.VECTOR)
+                return scalar(VectorKernels.extrema(data, offset, length, min));
+            double value = min ? Double.POSITIVE_INFINITY : Double.NEGATIVE_INFINITY;
+            for (int i = 0; i < length; i++) value = min ? Math.min(value, data[offset + i]) : Math.max(value, data[offset + i]);
+            return scalar(value);
+        }
+        double value = min ? Double.POSITIVE_INFINITY : Double.NEGATIVE_INFINITY;
+        StrideCursor cursor = new StrideCursor(shape, strides, offset);
+        for (int i = 0; i < length; i++, cursor.advance())
+            value = min ? Math.min(value, data[cursor.address]) : Math.max(value, data[cursor.address]);
+        return scalar(value);
     }
 
-    public Tensor max() {
-        if (size() == 0) throw new IllegalStateException("empty");
-        double[] x = {Double.NEGATIVE_INFINITY};
-        TensorIterator.each(shape, i -> x[0] = Math.max(x[0], get(i)));
-        return scalar(x[0]);
-    }
-
-    public Tensor sum(int a) {
-        a = axis(a);
-        int[] os = remove(shape, a);
-        Tensor t = zeros(os);
-        int ax = a;
-        int[] position = {0};
-        TensorIterator.each(os, o -> {
-            int base = offset;
-            for (int d = 0, j = 0; d < rank(); d++)
-                if (d != ax) base += o[j++] * strides[d];
-            double sum = 0;
-            for (int k = 0; k < shape[ax]; k++) sum += data[base + k * strides[ax]];
-            t.data[position[0]++] = sum;
-        });
-        return t;
-    }
+    public Tensor sum(int a) { return reduce(a, 0); }
 
     public Tensor mean(int a) {
         int ax = axis(a);
         return sum(ax).divide(shape[ax]);
     }
 
-    public Tensor min(int a) {
-        return extrema(a, true);
-    }
+    public Tensor min(int a) { return reduce(a, 1); }
 
-    public Tensor max(int a) {
-        return extrema(a, false);
-    }
+    public Tensor max(int a) { return reduce(a, 2); }
 
-    private Tensor extrema(int a, boolean min) {
-        a = axis(a);
-        int[] os = remove(shape, a);
-        Tensor t = alloc(os);
-        Arrays.fill(t.data, min ? Double.POSITIVE_INFINITY : Double.NEGATIVE_INFINITY);
-        int ax = a;
-        TensorIterator.each(shape, i -> {
-            int[] o = remove(i, ax);
-            double v = get(i);
-            t.set(min ? Math.min(t.get(o), v) : Math.max(t.get(o), v), o);
-        });
-        return t;
+    // Operation: 0 = sum, 1 = min, 2 = max. SIMD spans independent output elements,
+    // never the sum's reduction axis.
+    private Tensor reduce(int a, int operation) {
+        int ax = axis(a);
+        int[] os = remove(shape, ax);
+        Tensor out = alloc(os);
+        double initial = operation == 0 ? 0 : operation == 1 ? Double.POSITIVE_INFINITY : Double.NEGATIVE_INFINITY;
+        if (operation != 0) Arrays.fill(out.data, initial);
+        if (out.data.length == 0) return out;
+        if (backend == TensorBackend.VECTOR && isContiguous() && ax < rank() - 1) {
+            int inner = 1;
+            for (int d = ax + 1; d < rank(); d++) inner *= shape[d];
+            for (int o = 0; o < out.data.length; o += inner)
+                VectorKernels.reduceRows(data, offset + (o / inner) * shape[ax] * inner,
+                        out.data, o, shape[ax], inner, operation);
+            return out;
+        }
+        StrideCursor cursor = new StrideCursor(os, remove(strides, ax), offset);
+        for (int i = 0; i < out.data.length; i++, cursor.advance()) {
+            double value = initial;
+            for (int k = 0; k < shape[ax]; k++) {
+                double next = data[cursor.address + k * strides[ax]];
+                value = operation == 0 ? value + next : operation == 1 ? Math.min(value, next) : Math.max(value, next);
+            }
+            out.data[i] = value;
+        }
+        return out;
     }
 
     public Tensor softmax(int a) {
-        a = axis(a);
+        int ax = axis(a);
         Tensor out = alloc(shape);
-        int ax = a;
+        if (out.data.length == 0) return out;
         int[] outer = remove(shape, ax);
-        TensorIterator.each(outer, o -> {
-            int source = offset, target = 0;
-            for (int d = 0, j = 0; d < rank(); d++) {
-                if (d == ax) continue;
-                source += o[j] * strides[d];
-                target += o[j++] * out.strides[d];
-            }
+        StrideCursor source = new StrideCursor(outer, remove(strides, ax), offset);
+        StrideCursor target = new StrideCursor(outer, remove(out.strides, ax), 0);
+        for (int row = 0, count = TensorShape.sizeOf(outer); row < count; row++, source.advance(), target.advance()) {
             double max = Double.NEGATIVE_INFINITY;
-            for (int k = 0; k < shape[ax]; k++) max = Math.max(max, data[source + k * strides[ax]]);
+            boolean vector = backend == TensorBackend.VECTOR && strides[ax] == 1 && out.strides[ax] == 1;
+            if (vector) max = VectorKernels.extrema(data, source.address, shape[ax], false);
+            else for (int k = 0; k < shape[ax]; k++) max = Math.max(max, data[source.address + k * strides[ax]]);
             double sum = 0;
             for (int k = 0; k < shape[ax]; k++) {
-                double e = Math.exp(data[source + k * strides[ax]] - max);
-                out.data[target + k * out.strides[ax]] = e;
+                double e = Math.exp(data[source.address + k * strides[ax]] - max);
+                out.data[target.address + k * out.strides[ax]] = e;
                 sum += e;
             }
-            for (int k = 0; k < shape[ax]; k++) out.data[target + k * out.strides[ax]] /= sum;
-        });
+            if (vector) VectorKernels.scalar(out.data, target.address, sum, false, out.data, target.address, shape[ax], BinaryOp.DIVIDE);
+            else for (int k = 0; k < shape[ax]; k++) out.data[target.address + k * out.strides[ax]] /= sum;
+        }
         return out;
     }
 
@@ -824,8 +925,8 @@ public final class Tensor {
         double[] x = new double[(int) size()];
         if (isContiguous()) System.arraycopy(data, offset, x, 0, x.length);
         else {
-            int[] p = {0};
-            TensorIterator.each(shape, i -> x[p[0]++] = get(i));
+            StrideCursor cursor = new StrideCursor(shape, strides, offset);
+            for (int i = 0; i < x.length; i++, cursor.advance()) x[i] = data[cursor.address];
         }
         return x;
     }

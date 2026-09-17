@@ -165,3 +165,19 @@ Measures reset plus repeated backward through a shared 4,096-element addition gr
 Graph construction and seed creation are outside timing. Read the
 [OPT-10 results](GRADIENT_STORAGE_RESULTS.md) for ownership semantics, full-epoch
 comparisons and raw allocation/timing data.
+
+## OPT-11 kernel coverage
+
+```bash
+./gradlew :benchmarks:kernel --args='.*CoverageBenchmarks.run'
+./gradlew :benchmarks:kernel -PtensorBackend=java --args='.*CoverageBenchmarks.run'
+./gradlew :benchmarks:kernel --args='.*SigmoidCoverageBenchmarks.*'
+```
+
+`CoverageBenchmarks` covers reductions, higher-rank singleton broadcasting,
+strided map/copy, broadcast batched matmul with contiguous/transposed right
+operands, and explicit unary operations. Select cases with `-p operation=axisSum,min`
+or another operation name. `SigmoidCoverageBenchmarks` compares dispatch with the
+retained Java callback at 16, 128, and 4,096 elements (`-p size=...`).
+See [kernel coverage results](KERNEL_COVERAGE_RESULTS.md) for the retained and
+rejected candidates, reduction order, tolerances, and matched before/after commands.

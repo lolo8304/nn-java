@@ -1,9 +1,19 @@
-# Performance and allocation summary through OPT-10
+# Performance and allocation summary through OPT-11
 
-Latest implementation: OPT-10 working tree, 2026-09-17. This summary includes the work
-before the numbered roadmap and every completed item, OPT-01 through OPT-10.
+Latest implementation: OPT-11 working tree, 2026-09-17. This summary includes the work
+before the numbered roadmap and every completed item, OPT-01 through OPT-11.
 
-**Latest: reusable gradient storage (OPT-10)**
+**Latest: kernel coverage (OPT-11)**
+
+Ordered axis reductions, direct extrema, arbitrary-rank broadcast SIMD, stride
+cursors and batched matmul reuse improve the measured kernel cases on both
+backends. SIMD sigmoid is retained; unhelpful negate/square/tanh/log candidates
+were rejected. Sums and matmul retain their reduction order, and Java fallbacks
+remain available without the incubator module. The short two-fork comparison,
+allocation data, complete-epoch check and numerical tolerances are recorded in
+[OPT-11 kernel coverage results](KERNEL_COVERAGE_RESULTS.md).
+
+**Reusable gradient storage (OPT-10)**
 
 Controlled before/after runs against `69bd410`, using two JVM forks, three
 one-second warmups and five one-second measurements per fork, show **99.6% less
@@ -196,10 +206,11 @@ raw samples. Historical smoke tests are intentionally kept separate.
 The largest demonstrated full-epoch gains came from removing optimizer temporaries
 and bulk-loading batches. Vector acceleration helps selected arithmetic and matrix
 kernels, while the same allocation reductions generally benefit both backends.
-The next planned work is OPT-11: profile-guided kernel coverage. Peak-memory and
-real MNIST augmentation/validation/checkpoint measurements remain unmeasured here.
+The next planned work is OPT-15: broader workload profiling before OPT-12.
+Peak-memory and real MNIST augmentation/validation/checkpoint measurements remain
+unmeasured here.
 
-The implementation through OPT-10 passes **98 tests per backend (196 executions)**,
+The implementation through OPT-11 passes **106 tests per backend (212 executions)**,
 including numerical gradients, alias/stride behavior, graph branches, repeated
 backward, training and checkpoint tests. OPT-10 also verifies storage reuse, aliased seeds, stale nonfinite gradients and
 absent versus zero gradients with optimizer momentum.

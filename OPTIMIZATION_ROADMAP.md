@@ -12,7 +12,7 @@ backends, and recorded measurements. Nothing is currently In progress.
 
 See the [consolidated performance and allocation summary](benchmarks/OPTIMIZATION_SUMMARY.md)
 for pre-roadmap optimizations, every completed item, and current Java versus Vector
-measurements through OPT-10. The figures below preserve the original prioritization baseline.
+measurements through OPT-11. The figures below preserve the original prioritization baseline.
 
 Source: [measured results](benchmarks/OUTPUT_BUFFER_RESULTS.md) and
 [benchmark/profiling guide](benchmarks/GUIDE.md).
@@ -49,12 +49,17 @@ OPT-04 then reduces it to about 13.9 MB; see the [bulk batch measurements](bench
 | 8 · OPT-08 | Done | NN loss | Stable fused cross entropy | Use log-sum-exp directly from logits and a dedicated backward calculation to avoid the softmax/smoothing/log/multiply graph. | Implemented in [Variable.crossEntropy](nn/src/main/java/ch/lolo/nn/autograd/Variable.java). Unsmoothed objective and checkpoint migration documented; weighted targets, extreme logits, finite differences, views, graph lifetime, convergence and persistence tested on both backends. [Separate classification measurements](benchmarks/FUSED_CROSS_ENTROPY_RESULTS.md). |
 | 9 · OPT-09 | Done | NN gradients | Fuse activation backward kernels | Compute ReLU/LeakyReLU, sigmoid and tanh derivatives directly into gradient destinations instead of allocating masks and intermediate tensors. | Implemented direct gradient writes and accumulation for all four activations. Finite differences, zero/saturation behavior, views, aliases and shared graph lifetimes verified on both backends. [Allocation measurements](benchmarks/FUSED_ACTIVATION_RESULTS.md). |
 | 10 · OPT-10 | Done | NN gradients | Reuse gradient storage | Accumulate into owned gradient buffers instead of copying the first contribution and reallocating on subsequent contributions. Reuse storage across resets where safe. | Implemented owned in-place accumulation and buffer reuse across resets in [Variable](nn/src/main/java/ch/lolo/nn/autograd/Variable.java). Shared graphs, repeated backward, leaf accumulation, seed/view independence and absent versus zero gradients verified on both backends. [Backward and epoch measurements](benchmarks/GRADIENT_STORAGE_RESULTS.md). |
-| 11 · OPT-11 | Planned | Tensor | Extend optimized kernel coverage | Add specialized reductions, common broadcast layouts, batched matmul dispatch and unary operations where profiling justifies them. Split work into the subitems below. | Benchmark each addition on both backends; retain Java fallbacks. Test floating-point edge cases and document changes in reduction order. |
+| 11 · OPT-11 | Done | Tensor | Extend optimized kernel coverage | Implemented ordered reductions, arbitrary-rank broadcast runs, stride cursors, batched rank-2 dispatch and measured sigmoid SIMD. Unhelpful unary candidates retain Java evaluation. | Implemented in [Tensor](tensor/src/main/java/ch/lolo/tensor/Tensor.java) and shared kernels, based on `30b7905`. All 212 test executions pass. [Both-backend measurements, rejected candidates and numerical behavior](benchmarks/KERNEL_COVERAGE_RESULTS.md). |
 | 12 · OPT-12 | Planned | NN data | Optimize augmentation and prefetch | Profile real image transformations, improve hot resampling loops, and add bounded prefetch only if preparation limits training throughput. | Requires real-data profiling in OPT-15. Preserve training-only transforms, labels, deterministic RNG policy and validation/test isolation. |
 | 13 · OPT-13 | Deferred | Tensor | Parallel large matrix multiplication | Distribute independent output tiles across a bounded CPU worker pool once serial kernels are tuned. | Size thresholds, no nested oversubscription, controlled interaction with data loading, and latency/throughput measurements on larger models. |
 | 14 · OPT-14 | Deferred | Tensor architecture | Float32 and native BLAS evaluation | Evaluate these as separate backend/data-type projects after simpler optimizations. Float32 reduces element storage; native BLAS may help sufficiently large products. | Measure conversion/copy/native-call overhead; define precision, convergence, packaging, memory lifetime and checkpoint compatibility. Preserve portable Java/Vector paths. |
 
-**Start next with OPT-11** (profile-guided kernel coverage; OPT-16 through OPT-20).
+**Start next with OPT-15** (broader workload profiling, a prerequisite for OPT-12).
+OPT-11 and OPT-16 through OPT-20 are complete: [kernel coverage results](benchmarks/KERNEL_COVERAGE_RESULTS.md).
+Both backends retain portable fallbacks; sums and matmul preserve addition order.
+SIMD sigmoid is retained from 128 elements; unhelpful unary candidates were rejected.
+All 212 test executions pass.
+
 OPT-10 is complete: [gradient storage results](benchmarks/GRADIENT_STORAGE_RESULTS.md).
 Repeated backward allocation falls by 99.6%; full epochs save about 20–34% allocation.
 Retained buffers remain live until their variable is collected. No general epoch
@@ -106,11 +111,11 @@ the whole parent optimization.
 | ID | Status | Related item | Optimization | Description / acceptance criteria |
 |---|---|---|---|---|
 | OPT-15 | Planned | OPT-01, OPT-12 | Broader workload profiling | Add real MNIST augmentation/validation/checkpoint breakdowns, standalone inference benchmarks and an explicit peak-memory methodology. Current allocation counters do not measure peak live memory. |
-| OPT-16 | Planned | OPT-11 | Reduction kernels | Specialize sum, axis reductions, min/max and softmax row reductions. SIMD sums may reorder additions; test cancellation, large magnitudes, NaNs, infinities, signed zero and empty shapes. |
-| OPT-17 | Planned | OPT-11 | Broadcast SIMD coverage | Extend beyond same-shape/scalar operations and 2D matrix + 1D right operand to singleton axes and higher ranks. Avoid materializing full broadcast operands; preserve subtraction/division operand order. |
-| OPT-18 | Planned | OPT-11 | Noncontiguous traversal | Replace remaining per-element index arrays in generic map/copy/extrema and fallback paths with stride cursors. Preserve public generator callback semantics and test arbitrary ranks and empty shapes. |
-| OPT-19 | Planned | OPT-11 | Batched matmul reuse | Resolve each batch's source offsets once and reuse optimized 2D kernels rather than the generic per-output path. Cover batch broadcasting, vectors and strided views. |
-| OPT-20 | Planned | OPT-11 | Unary kernels | Specialize negate, square, sigmoid, tanh and log where measured. Do not attempt to infer arbitrary callback behavior; validate approximation error and special values. |
+| OPT-16 | Done | OPT-11 | Reduction kernels | Implemented direct extrema and cursor axis reductions, SIMD across independent outputs, and contiguous softmax max/divide. Sums retain addition order; special values and empty shapes verified. [Results](benchmarks/KERNEL_COVERAGE_RESULTS.md). |
+| OPT-17 | Done | OPT-11 | Broadcast SIMD coverage | Implemented arbitrary-rank contiguous inner runs on both backends, with Vector SIMD and either operand broadcasting singleton axes. Java cursor fallback and overlapping-input snapshots preserve operand order and ownership. [Results](benchmarks/KERNEL_COVERAGE_RESULTS.md). |
+| OPT-18 | Done | OPT-11 | Noncontiguous traversal | Implemented stride cursors for map/copy/toArray, reductions and generic binary/batch traversal. Generator callbacks retain independent indices; existing buffer loops already reuse index arrays. [Results](benchmarks/KERNEL_COVERAGE_RESULTS.md). |
+| OPT-19 | Done | OPT-11 | Batched matmul reuse | Implemented per-batch offsets and reuse of optimized rank-2 kernels directly into output regions, including blocked/packed paths, batch broadcasting, vectors and strided views. [Results](benchmarks/KERNEL_COVERAGE_RESULTS.md). |
+| OPT-20 | Done | OPT-11 | Unary kernels | Measured all five unary candidates on both backends. Retained SIMD sigmoid at 128+ contiguous elements with 8 ULP finite-reference tests; negate, square, tanh and log keep Java evaluation. [Results](benchmarks/KERNEL_COVERAGE_RESULTS.md). |
 | OPT-21 | Planned | OPT-10 | Autograd bookkeeping | Profile parent collections, closures, topology allocation and recursive traversal. Evaluate iterative traversal and leaner node storage; preserve deep/shared graphs and repeated backward. |
 | OPT-22 | Planned | OPT-05 | Argmax and metric kernels | Replace repeated slicing/indexing/shape cloning with row-wise argmax operations. Preserve ties, shape checks and classification semantics. |
 | OPT-23 | Deferred | OPT-05, OPT-07 | Dense + bias + activation fusion | Start with inference to reduce passes and intermediates. Training support must retain the values needed by backward and preserve an unfused reference path. |

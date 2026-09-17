@@ -2,6 +2,7 @@ package ch.lolo.tensor;
 
 import jdk.incubator.vector.DoubleVector;
 import jdk.incubator.vector.VectorSpecies;
+import jdk.incubator.vector.VectorOperators;
 
 /** Loaded only when the VECTOR backend is selected; no vector types cross this boundary. */
 final class VectorKernels {
@@ -111,6 +112,12 @@ final class VectorKernels {
     static void matmulPackedRight(double[] a, int ao, int rowStride, int innerStride,
                                   double[] b, int bo, int rightRowStride, int rightColumnStride,
                                   double[] out, int m, int k, int n) {
+        matmulPackedRight(a, ao, rowStride, innerStride, b, bo, rightRowStride, rightColumnStride, out, 0, m, k, n);
+    }
+
+    static void matmulPackedRight(double[] a, int ao, int rowStride, int innerStride,
+                                  double[] b, int bo, int rightRowStride, int rightColumnStride,
+                                  double[] out, int outputOffset, int m, int k, int n) {
         if (m == 0 || k == 0 || n == 0) return;
         int width = Math.min(n, 64);
         double[] panel = new double[k * width];
@@ -122,8 +129,50 @@ final class VectorKernels {
                     panel[q * columns + col] = b[right + col * rightColumnStride];
             }
             matmul(a, ao, rowStride, innerStride, panel, 0, columns,
-                    out, start, n, m, k, columns);
+                    out, outputOffset + start, n, m, k, columns);
         }
+    }
+
+    static double extrema(double[] data, int offset, int length, boolean min) {
+        double initial = min ? Double.POSITIVE_INFINITY : Double.NEGATIVE_INFINITY;
+        var acc = DoubleVector.broadcast(SPECIES, initial);
+        int i = 0, bound = SPECIES.loopBound(length);
+        for (; i < bound; i += SPECIES.length()) {
+            var next = DoubleVector.fromArray(SPECIES, data, offset + i);
+            acc = min ? acc.min(next) : acc.max(next);
+        }
+        double result = acc.reduceLanes(min ? VectorOperators.MIN : VectorOperators.MAX);
+        for (; i < length; i++) result = min ? Math.min(result, data[offset + i]) : Math.max(result, data[offset + i]);
+        return result;
+    }
+
+    static void reduceRows(double[] data, int offset, double[] out, int outputOffset,
+                           int rows, int columns, int operation) {
+        int bound = SPECIES.loopBound(columns);
+        for (int r = 0; r < rows; r++) {
+            int source = offset + r * columns;
+            int c = 0;
+            for (; c < bound; c += SPECIES.length()) {
+                var acc = DoubleVector.fromArray(SPECIES, out, outputOffset + c);
+                var next = DoubleVector.fromArray(SPECIES, data, source + c);
+                (operation == 0 ? acc.add(next) : operation == 1 ? acc.min(next) : acc.max(next))
+                        .intoArray(out, outputOffset + c);
+            }
+            for (; c < columns; c++) {
+                double v = data[source + c], acc = out[outputOffset + c];
+                out[outputOffset + c] = operation == 0 ? acc + v : operation == 1 ? Math.min(acc, v) : Math.max(acc, v);
+            }
+        }
+    }
+
+    static void sigmoid(double[] data, int offset, double[] out, int length) {
+        int i = 0, bound = SPECIES.loopBound(length);
+        var one = DoubleVector.broadcast(SPECIES, 1);
+        for (; i < bound; i += SPECIES.length()) {
+            var v = DoubleVector.fromArray(SPECIES, data, offset + i);
+            one.div(v.neg().lanewise(VectorOperators.EXP).add(1)).intoArray(out, i);
+        }
+        for (; i < length; i++) out[i] = 1 / (1 + Math.exp(-data[offset + i]));
     }
 
 }

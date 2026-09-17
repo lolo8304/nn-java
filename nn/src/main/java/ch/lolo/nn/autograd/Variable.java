@@ -188,7 +188,7 @@ public class Variable {
 
     public Variable log() {
         Variable a = this;
-        Tensor y = TensorOps.map(value, Math::log);
+        Tensor y = value.log();
         if (!recordsGrad()) return of(y);
         return node(y, List.of(a), g -> a.addGrad(g.divide(a.value)));
     }
@@ -215,7 +215,7 @@ public class Variable {
 
     public Variable tanh() {
         Variable a = this;
-        Tensor y = TensorOps.map(value, Math::tanh);
+        Tensor y = value.tanh();
         if (!recordsGrad()) return of(y);
         return node(y, List.of(a), g -> {
             boolean accumulate = a.grad != null;

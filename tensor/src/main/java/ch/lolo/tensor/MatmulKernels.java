@@ -17,6 +17,12 @@ final class MatmulKernels {
     static void matmul(double[] a, int ao, int rowStride, int innerStride,
                        double[] b, int bo, int rightRowStride, int rightColumnStride,
                        double[] out, int m, int k, int n, boolean vector) {
+        matmul(a, ao, rowStride, innerStride, b, bo, rightRowStride, rightColumnStride, out, 0, m, k, n, vector);
+    }
+
+    static void matmul(double[] a, int ao, int rowStride, int innerStride,
+                       double[] b, int bo, int rightRowStride, int rightColumnStride,
+                       double[] out, int outputOffset, int m, int k, int n, boolean vector) {
         if (rightColumnStride != 1) {
             // Bounded scratch, freshly populated for mutable transpose/slice views.
             double[] panel = new double[INNER * COLUMNS];
@@ -32,7 +38,7 @@ final class MatmulKernels {
                     // Reuse the packed panel across all rows before replacing it.
                     for (int row = 0; row < m; row += ROWS)
                         tile(a, ao + row * rowStride + q * innerStride, rowStride, innerStride,
-                                panel, 0, columns, out, row * n + col, n,
+                                panel, 0, columns, out, outputOffset + row * n + col, n,
                                 Math.min(ROWS, m - row), depth, columns, vector);
                 }
             }
@@ -43,7 +49,7 @@ final class MatmulKernels {
                     for (int q = 0; q < k; q += INNER)
                         tile(a, ao + row * rowStride + q * innerStride, rowStride, innerStride,
                                 b, bo + q * rightRowStride + col, rightRowStride,
-                                out, row * n + col, n, Math.min(ROWS, m - row),
+                                out, outputOffset + row * n + col, n, Math.min(ROWS, m - row),
                                 Math.min(INNER, k - q), Math.min(width, n - col), vector);
         }
     }
