@@ -42,7 +42,7 @@ final class TensorShape {
             int ai = i - (n - a.length), bi = i - (n - b.length), x = ai < 0 ? 1 : a[ai], y = bi < 0 ? 1 : b[bi];
             if (x != y && x != 1 && y != 1)
                 throw new IllegalArgumentException("cannot broadcast " + Arrays.toString(a) + " and " + Arrays.toString(b));
-            r[i] = Math.max(x, y);
+            r[i] = x == 1 ? y : x;
         }
         return r;
     }

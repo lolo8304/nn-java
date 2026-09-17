@@ -8,7 +8,7 @@ A small, educational neural-network framework written in pure Java on top of the
 - `nn` — reverse-mode autograd, sequential layers, losses, optimizers, datasets/loaders, metrics and model persistence.
 - `examples` — XOR, regression, classification and MNIST examples.
 
-The Gradle build targets **Java 26**. The source intentionally stays simple enough to compile on Java 21+ as well.
+The Gradle build targets **Java 25** in every module. No preview features or incubator modules are required.
 
 ## Quick start
 
@@ -46,7 +46,7 @@ y.backward();
 System.out.println(x.grad().scalar()); // 6.0
 ```
 
-Gradients accumulate until `zeroGrad()` is called. `Optimizer.zeroGrad(parameters)` handles this during training.
+Leaf gradients accumulate until `zeroGrad()` is called. Intermediate gradients are recomputed on each backward pass. `Optimizer.zeroGrad(parameters)` handles leaf resets during training.
 
 ## Layers
 
@@ -172,3 +172,40 @@ With a local Gradle installation you can generate the standard wrapper once with
 ## Design boundary
 
 V1 intentionally supports sequential networks only. It has a real reverse-mode autograd engine, but does not attempt arbitrary graph-model composition, convolutions, recurrent layers, GPU execution, mixed precision or parallel training.
+
+## Performance and Java 25
+
+Contiguous elementwise operations, copies and array exports use direct array loops;
+broadcasting computes addresses without allocating an index array per element.
+Axis sums and softmax use strides directly, including on sliced/transposed views.
+Softmax backward uses `y * (g - sum(g * y))`, linear in the number of classes.
+Backpropagation skips derivatives for constant operands, and optimizers allocate
+initial moment/velocity tensors only when first needed.
+
+Run the local timing/allocation comparison harness on Java 25:
+
+```bash
+./gradlew :nn:classes
+mkdir -p build/benchmarks
+javac -cp tensor/build/classes/java/main:nn/build/classes/java/main \
+  -d build/benchmarks examples/src/main/java/ch/lolo/benchmark/KernelBenchmark.java
+java -Xms256m -Xmx512m \
+  -cp build/benchmarks:tensor/build/classes/java/main:nn/build/classes/java/main ch.lolo.benchmark.KernelBenchmark
+```
+
+This short harness is for local comparisons; use JMH with multiple forks for reliable
+performance decisions. See [benchmark notes](benchmarks/README.md) for the measured comparison.
+
+Java 25's [Vector API](https://docs.oracle.com/en/java/javase/25/docs/api/jdk.incubator.vector/jdk/incubator/vector/package-summary.html)
+is an optional next step for explicit SIMD kernels. It remains an incubator module
+and requires `--add-modules jdk.incubator.vector` at compile time and runtime.
+The current implementation keeps ordinary Java loops and requires no extra flags.
+For much larger matrix workloads, a native BLAS backend through the
+[Foreign Function & Memory API](https://docs.oracle.com/en/java/javase/25/docs/api/java.base/java/lang/foreign/package-summary.html)
+is another option, at the cost of a native dependency and data-transfer/lifetime management.
+Neither backend is implemented here; measure representative training before choosing one.
+
+Remaining boundaries: mixed vector/matrix matmul supports forward execution but not
+autograd; cross entropy currently smooths softmax probabilities rather than using a
+fused log-sum-exp loss; inference still builds autograd nodes for trainable parameters.
+These are opportunities for a separate API/numerical change.

@@ -227,27 +227,45 @@ public final class Tensor {
 
     public Tensor copy() {
         Tensor t = alloc(shape);
-        TensorIterator.each(shape, i -> t.set(get(i), i));
+        if (isContiguous()) System.arraycopy(data, offset, t.data, 0, t.data.length);
+        else TensorIterator.each(shape, i -> t.set(get(i), i));
         return t;
     }
 
-    private Tensor map(DoubleUnaryOperator f) {
+    /** Returns an elementwise transformation in new, independent storage. */
+    public Tensor map(DoubleUnaryOperator f) {
         Tensor t = alloc(shape);
-        TensorIterator.each(shape, i -> t.set(f.applyAsDouble(get(i)), i));
+        if (isContiguous()) {
+            for (int i = 0; i < t.data.length; i++) t.data[i] = f.applyAsDouble(data[offset + i]);
+        } else TensorIterator.each(shape, i -> t.set(f.applyAsDouble(get(i)), i));
         return t;
     }
 
-    private double bget(int[] oi) {
-        int shift = oi.length - rank();
-        int[] i = new int[rank()];
-        for (int x = 0; x < rank(); x++) i[x] = shape[x] == 1 ? 0 : oi[x + shift];
-        return get(i);
+    private int broadcastAddress(int[] index) {
+        int address = offset, shift = index.length - rank();
+        for (int a = 0; a < rank(); a++)
+            if (shape[a] != 1) address += index[a + shift] * strides[a];
+        return address;
     }
 
     private Tensor bin(Tensor b, DoubleBinaryOperator f) {
         int[] s = TensorShape.broadcast(shape, b.shape);
+        if (b.isScalar()) return map(x -> f.applyAsDouble(x, b.scalar()));
+        if (isScalar()) return b.map(x -> f.applyAsDouble(scalar(), x));
         Tensor t = alloc(s);
-        TensorIterator.each(s, i -> t.set(f.applyAsDouble(bget(i), b.bget(i)), i));
+        if (Arrays.equals(shape, b.shape) && isContiguous() && b.isContiguous()) {
+            for (int i = 0; i < t.data.length; i++)
+                t.data[i] = f.applyAsDouble(data[offset + i], b.data[b.offset + i]);
+        } else {
+            int[] index = new int[s.length];
+            for (int i = 0; i < t.data.length; i++) {
+                t.data[i] = f.applyAsDouble(data[broadcastAddress(index)], b.data[b.broadcastAddress(index)]);
+                for (int a = s.length - 1; a >= 0; a--) {
+                    if (++index[a] < s[a]) break;
+                    index[a] = 0;
+                }
+            }
+        }
         return t;
     }
 
@@ -357,18 +375,19 @@ public final class Tensor {
     }
 
     private double matGet(int[] batch, int row, int col, boolean vec) {
-        if (vec) return get(col);
-        int br = rank() - 2, shift = batch.length - br;
-        int[] i = new int[rank()];
-        for (int x = 0; x < br; x++) i[x] = shape[x] == 1 ? 0 : batch[x + shift];
-        i[rank() - 2] = row;
-        i[rank() - 1] = col;
-        return get(i);
+        if (vec) return data[offset + col * strides[0]];
+        int br = rank() - 2, shift = batch.length - br, address = offset;
+        for (int x = 0; x < br; x++)
+            if (shape[x] != 1) address += batch[x + shift] * strides[x];
+        return data[address + row * strides[br] + col * strides[br + 1]];
     }
 
     public Tensor sum() {
         double[] s = {0};
-        TensorIterator.each(shape, i -> s[0] += get(i));
+        if (isContiguous()) {
+            int end = offset + (int) size();
+            for (int i = offset; i < end; i++) s[0] += data[i];
+        } else TensorIterator.each(shape, i -> s[0] += get(i));
         return scalar(s[0]);
     }
 
@@ -395,9 +414,14 @@ public final class Tensor {
         int[] os = remove(shape, a);
         Tensor t = zeros(os);
         int ax = a;
-        TensorIterator.each(shape, i -> {
-            int[] o = remove(i, ax);
-            t.set(t.get(o) + get(i), o);
+        int[] position = {0};
+        TensorIterator.each(os, o -> {
+            int base = offset;
+            for (int d = 0, j = 0; d < rank(); d++)
+                if (d != ax) base += o[j++] * strides[d];
+            double sum = 0;
+            for (int k = 0; k < shape[ax]; k++) sum += data[base + k * strides[ax]];
+            t.data[position[0]++] = sum;
         });
         return t;
     }
@@ -435,19 +459,21 @@ public final class Tensor {
         int ax = a;
         int[] outer = remove(shape, ax);
         TensorIterator.each(outer, o -> {
+            int source = offset, target = 0;
+            for (int d = 0, j = 0; d < rank(); d++) {
+                if (d == ax) continue;
+                source += o[j] * strides[d];
+                target += o[j++] * out.strides[d];
+            }
             double max = Double.NEGATIVE_INFINITY;
-            for (int k = 0; k < shape[ax]; k++) max = Math.max(max, get(insert(o, ax, k)));
+            for (int k = 0; k < shape[ax]; k++) max = Math.max(max, data[source + k * strides[ax]]);
             double sum = 0;
             for (int k = 0; k < shape[ax]; k++) {
-                int[] i = insert(o, ax, k);
-                double e = Math.exp(get(i) - max);
-                out.set(e, i);
+                double e = Math.exp(data[source + k * strides[ax]] - max);
+                out.data[target + k * out.strides[ax]] = e;
                 sum += e;
             }
-            for (int k = 0; k < shape[ax]; k++) {
-                int[] i = insert(o, ax, k);
-                out.set(out.get(i) / sum, i);
-            }
+            for (int k = 0; k < shape[ax]; k++) out.data[target + k * out.strides[ax]] /= sum;
         });
         return out;
     }
@@ -474,8 +500,11 @@ public final class Tensor {
 
     public double[] toArray() {
         double[] x = new double[(int) size()];
-        int[] p = {0};
-        TensorIterator.each(shape, i -> x[p[0]++] = get(i));
+        if (isContiguous()) System.arraycopy(data, offset, x, 0, x.length);
+        else {
+            int[] p = {0};
+            TensorIterator.each(shape, i -> x[p[0]++] = get(i));
+        }
         return x;
     }
 

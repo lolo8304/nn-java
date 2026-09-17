@@ -158,12 +158,13 @@ public final class Sequential {
     private Evaluation trainEpoch(Dataset data, int batchSize, boolean shuffle) {
         double totalLoss = 0, totalAccuracy = 0;
         int total = 0;
+        List<Parameter> parameters = parameters();
         for (Batch batch : new DataLoader(data, batchSize, shuffle)) {
-            optimizer.zeroGrad(parameters());
+            optimizer.zeroGrad(parameters);
             var out = forward(Variable.of(batch.inputs()), true);
             var value = loss.compute(out, batch.targets());
             value.backward();
-            optimizer.step(parameters());
+            optimizer.step(parameters);
             int count = batch.inputs().shape()[0];
             totalLoss += value.value().scalar() * count;
             totalAccuracy += classificationAccuracy(out.value(), batch.targets()) * count;

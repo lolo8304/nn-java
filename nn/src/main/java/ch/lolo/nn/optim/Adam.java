@@ -52,14 +52,14 @@ public final class Adam implements Optimizer {
 
     public void step(List<Parameter> ps) {
         t++;
+        double c1 = 1 - Math.pow(b1, t), c2 = 1 - Math.pow(b2, t);
         for (Parameter p : ps) {
             Tensor g = p.grad();
             if (g == null) continue;
-            Tensor mm = m.getOrDefault(p, Tensor.zeros(g.shape())).multiply(b1).add(g.multiply(1 - b1));
-            Tensor vv = v.getOrDefault(p, Tensor.zeros(g.shape())).multiply(b2).add(g.pow(2).multiply(1 - b2));
+            Tensor mm = m.computeIfAbsent(p, ignored -> Tensor.zeros(g.shape())).multiply(b1).add(g.multiply(1 - b1));
+            Tensor vv = v.computeIfAbsent(p, ignored -> Tensor.zeros(g.shape())).multiply(b2).add(g.pow(2).multiply(1 - b2));
             m.put(p, mm);
             v.put(p, vv);
-            double c1 = 1 - Math.pow(b1, t), c2 = 1 - Math.pow(b2, t);
             Tensor delta = Tensor.generate(i -> -lr * (mm.get(i) / c1) / (Math.sqrt(vv.get(i) / c2) + eps), g.shape());
             p.applyDelta(delta);
         }

@@ -8,6 +8,7 @@ final class TensorOps {
             c.accept(new int[0]);
             return;
         }
+        for (int d : shape) if (d == 0) return;
         int[] i = new int[shape.length];
         while (true) {
             c.accept(i.clone());
@@ -21,14 +22,17 @@ final class TensorOps {
     }
 
     static Tensor map(Tensor x, java.util.function.DoubleUnaryOperator f) {
-        return Tensor.generate(i -> f.applyAsDouble(x.get(i)), x.shape());
+        return x.map(f);
     }
 
     static Tensor unbroadcast(Tensor g, int[] target) {
         Tensor r = g;
         while (r.rank() > target.length) r = r.sum(0);
         for (int a = 0; a < target.length; a++)
-            if (target[a] == 1 && r.shape()[a] != 1) r = r.sum(a).reshape(withOne(r.shape(), a));
+            if (target[a] == 1 && r.shape()[a] != 1) {
+                r = r.sum(a);
+                r = r.reshape(withOne(r.shape(), a));
+            }
         return r;
     }
 

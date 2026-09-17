@@ -71,8 +71,8 @@ public class Variable {
     public Variable add(Variable b) {
         Variable a = this;
         return node(value.add(b.value), List.of(a, b), g -> {
-            a.addGrad(TensorOps.unbroadcast(g, a.value.shape()));
-            b.addGrad(TensorOps.unbroadcast(g, b.value.shape()));
+            if (a.requiresGrad) a.addGrad(TensorOps.unbroadcast(g, a.value.shape()));
+            if (b.requiresGrad) b.addGrad(TensorOps.unbroadcast(g, b.value.shape()));
         });
     }
 
@@ -87,16 +87,16 @@ public class Variable {
     public Variable subtract(Variable b) {
         Variable a = this;
         return node(value.subtract(b.value), List.of(a, b), g -> {
-            a.addGrad(TensorOps.unbroadcast(g, a.value.shape()));
-            b.addGrad(TensorOps.unbroadcast(g.negate(), b.value.shape()));
+            if (a.requiresGrad) a.addGrad(TensorOps.unbroadcast(g, a.value.shape()));
+            if (b.requiresGrad) b.addGrad(TensorOps.unbroadcast(g.negate(), b.value.shape()));
         });
     }
 
     public Variable multiply(Variable b) {
         Variable a = this;
         return node(value.multiply(b.value), List.of(a, b), g -> {
-            a.addGrad(TensorOps.unbroadcast(g.multiply(b.value), a.value.shape()));
-            b.addGrad(TensorOps.unbroadcast(g.multiply(a.value), b.value.shape()));
+            if (a.requiresGrad) a.addGrad(TensorOps.unbroadcast(g.multiply(b.value), a.value.shape()));
+            if (b.requiresGrad) b.addGrad(TensorOps.unbroadcast(g.multiply(a.value), b.value.shape()));
         });
     }
 
@@ -107,8 +107,8 @@ public class Variable {
     public Variable divide(Variable b) {
         Variable a = this;
         return node(value.divide(b.value), List.of(a, b), g -> {
-            a.addGrad(TensorOps.unbroadcast(g.divide(b.value), a.value.shape()));
-            b.addGrad(TensorOps.unbroadcast(g.multiply(a.value).divide(b.value.pow(2)).negate(), b.value.shape()));
+            if (a.requiresGrad) a.addGrad(TensorOps.unbroadcast(g.divide(b.value), a.value.shape()));
+            if (b.requiresGrad) b.addGrad(TensorOps.unbroadcast(g.multiply(a.value).divide(b.value.pow(2)).negate(), b.value.shape()));
         });
     }
 
@@ -117,15 +117,15 @@ public class Variable {
         Tensor out = value.matmul(b.value);
         return node(out, List.of(a, b), g -> {
             if (a.value.rank() == 2 && b.value.rank() == 2) {
-                a.addGrad(g.matmul(b.value.transpose()));
-                b.addGrad(a.value.transpose().matmul(g));
+                if (a.requiresGrad) a.addGrad(g.matmul(b.value.transpose()));
+                if (b.requiresGrad) b.addGrad(a.value.transpose().matmul(g));
             } else if (a.value.rank() == 1 && b.value.rank() == 1) {
-                a.addGrad(b.value.multiply(g.scalar()));
-                b.addGrad(a.value.multiply(g.scalar()));
+                if (a.requiresGrad) a.addGrad(b.value.multiply(g.scalar()));
+                if (b.requiresGrad) b.addGrad(a.value.multiply(g.scalar()));
             } else { // general batched/vector fallback: numerical-shape algebra for >=2D
                 if (a.value.rank() >= 2 && b.value.rank() >= 2) {
-                    a.addGrad(TensorOps.unbroadcast(g.matmul(TensorOps.transposeLast2(b.value)), a.value.shape()));
-                    b.addGrad(TensorOps.unbroadcast(TensorOps.transposeLast2(a.value).matmul(g), b.value.shape()));
+                    if (a.requiresGrad) a.addGrad(TensorOps.unbroadcast(g.matmul(TensorOps.transposeLast2(b.value)), a.value.shape()));
+                    if (b.requiresGrad) b.addGrad(TensorOps.unbroadcast(TensorOps.transposeLast2(a.value).matmul(g), b.value.shape()));
                 } else throw new UnsupportedOperationException("autograd matmul vector/matrix mixed not yet supported");
             }
         });
@@ -203,15 +203,15 @@ public class Variable {
             int[] outer = new int[sh.length - 1];
             for (int i = 0, j = 0; i < sh.length; i++) if (i != ax) outer[j++] = sh[i];
             TensorOps.each(outer, o -> {
+                double dot = 0;
+                int[] index = TensorOps.insert(o, ax, 0);
+                for (int j = 0; j < n; j++) {
+                    index[ax] = j;
+                    dot += g.get(index) * y.get(index);
+                }
                 for (int i = 0; i < n; i++) {
-                    double s = 0;
-                    int[] ii = TensorOps.insert(o, ax, i);
-                    for (int j = 0; j < n; j++) {
-                        int[] jj = TensorOps.insert(o, ax, j);
-                        double jac = y.get(ii) * ((i == j ? 1 : 0) - y.get(jj));
-                        s += g.get(jj) * jac;
-                    }
-                    dx.set(s, ii);
+                    index[ax] = i;
+                    dx.set(y.get(index) * (g.get(index) - dot), index);
                 }
             });
             a.addGrad(dx);
@@ -224,9 +224,13 @@ public class Variable {
     }
 
     public void backward(Tensor seed) {
+        if (!Arrays.equals(seed.shape(), value.shape()))
+            throw new IllegalArgumentException("gradient seed shape differs from output");
         List<Variable> topo = new ArrayList<>();
         Set<Variable> seen = Collections.newSetFromMap(new IdentityHashMap<>());
         build(this, seen, topo);
+        // Intermediate adjoints belong to this traversal; only leaf gradients accumulate.
+        for (Variable v : topo) if (!v.parents.isEmpty()) v.grad = null;
         addGrad(seed);
         for (int i = topo.size() - 1; i >= 0; i--) {
             Variable v = topo.get(i);
