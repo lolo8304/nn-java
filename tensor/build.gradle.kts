@@ -25,3 +25,11 @@ tasks.test {
         events("passed", "skipped", "failed")
     }
 }
+
+// Only this module references incubator types; JAVA runtime mode needs no module flag.
+tasks.withType<JavaCompile>().configureEach {
+    options.compilerArgs.addAll(listOf("--add-modules", "jdk.incubator.vector"))
+}
+tasks.withType<Javadoc>().configureEach {
+    (options as StandardJavadocDocletOptions).addStringOption("-add-modules", "jdk.incubator.vector")
+}

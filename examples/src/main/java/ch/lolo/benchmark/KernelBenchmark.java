@@ -8,6 +8,7 @@ import java.lang.management.ManagementFactory;
 public class KernelBenchmark {
     private static volatile Object sink;
     public static void main(String[] args) {
+        System.out.println("Tensor backend: " + Tensor.backend());
         Tensor x = Tensor.random(42L, 32, 128), y = Tensor.random(43L, 32, 128);
         Tensor bias = Tensor.random(44L, 128);
         measure("elementwise", () -> x.multiply(y).add(bias).relu());

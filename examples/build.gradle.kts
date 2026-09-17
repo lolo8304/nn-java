@@ -13,6 +13,10 @@ tasks.test { useJUnitPlatform() }
 
 application {
     mainClass.set("ch.lolo.examples.XorExample")
+    // Generated distribution launchers need the same startup configuration as run tasks.
+    applicationDefaultJvmArgs = if (providers.gradleProperty("tensorBackend").orElse("vector").get() == "vector")
+        listOf("--add-modules", "jdk.incubator.vector", "-Dtensor.backend=vector")
+    else listOf("-Dtensor.backend=java")
 }
 
 tasks.register<JavaExec>("runXor") {

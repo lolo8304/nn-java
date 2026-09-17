@@ -8,7 +8,10 @@ A small, educational neural-network framework written in pure Java on top of the
 - `nn` — reverse-mode autograd, sequential layers, losses, optimizers, datasets/loaders, metrics and model persistence.
 - `examples` — XOR, regression, classification and MNIST examples.
 
-The Gradle build targets **Java 26** in every module. No preview features or incubator modules are required.
+The Gradle build targets **Java 26** in every module. No preview features are required.
+The default Vector backend uses `jdk.incubator.vector`, included in the JDK.
+Gradle supplies its runtime flag automatically. The explicit pure Java backend
+needs no incubator module at runtime.
 
 ## Quick start
 
@@ -175,6 +178,9 @@ V1 intentionally supports sequential networks only. It has a real reverse-mode a
 
 ## Performance and Java 26
 
+See the [optimization roadmap](OPTIMIZATION_ROADMAP.md) for prioritized future
+tensor and neural-network work, dependencies, and validation criteria.
+
 Contiguous elementwise operations, copies and array exports use direct array loops;
 broadcasting computes addresses without allocating an index array per element.
 Axis sums and softmax use strides directly, including on sliced/transposed views.
@@ -193,16 +199,72 @@ compilation, tests, and all example/benchmark run tasks, even when the shell's
 `java` command points to an older JDK. The benchmark uses a 256–512 MiB heap.
 
 This short harness is for local comparisons; use JMH with multiple forks for reliable
-performance decisions. See [benchmark notes](benchmarks/README.md) for the measured comparison.
+performance decisions. See [latest Java/Vector benchmark results](benchmarks/README.md#current-java-26-backend-measurements)
+for timings, allocation counts, the user-reported comparison, and the subsequent
+default-Vector verification run.
 
-Java 26's [Vector API](https://docs.oracle.com/en/java/javase/26/docs/api/jdk.incubator.vector/jdk/incubator/vector/package-summary.html)
-is an optional next step for explicit SIMD kernels. It remains an incubator module
-and requires `--add-modules jdk.incubator.vector` at compile time and runtime.
-The current implementation keeps ordinary Java loops and requires no extra flags.
+### Global execution backend
+
+Select the backend once in application code, before training or prediction:
+
+```java
+import ch.lolo.tensor.Tensor;
+import ch.lolo.tensor.TensorBackend;
+
+Tensor.setBackend(TensorBackend.VECTOR); // default: SIMD kernels with Java fallbacks
+Tensor.setBackend(TensorBackend.JAVA);   // explicit override: ordinary Java kernels
+System.out.println(Tensor.backend());
+```
+
+This is process-wide and applies to existing tensors and all neural networks; it is
+not saved in model checkpoints. Configure it before computation begins, and avoid
+switching while other threads are computing. Ordinary Java kernels may also be
+auto-vectorized by the JVM; JAVA means no explicit Vector API calls.
+
+For Gradle example and benchmark runs, select the backend with a project property.
+Gradle supplies both the runtime module flag and the startup property automatically:
+
+```bash
+./gradlew :examples:runKernelBenchmark                       # VECTOR (default)
+./gradlew :examples:runKernelBenchmark -PtensorBackend=java   # JAVA
+./gradlew :examples:runMnist                                 # VECTOR (default)
+```
+
+For your own application, launch with `--add-modules jdk.incubator.vector`.
+VECTOR is selected by default; `-Dtensor.backend=vector` is optional. To run
+without the module, use `-Dtensor.backend=java` at startup. This startup override
+is necessary before calling any Tensor method in a JVM without the module.
+Generated example distribution launchers also include the selected backend's flags.
+Switching back to JAVA in code does not unload the module. Selecting VECTOR
+without the module fails with a clear error; a failed runtime switch leaves the
+current backend unchanged. `Tensor.isVectorAvailable()` checks whether the module
+is resolved, not whether it will be faster on your CPU.
+
+The [Java 26 Vector API](https://docs.oracle.com/en/java/javase/26/docs/api/jdk.incubator.vector/jdk/incubator/vector/package-summary.html)
+remains incubating. Gradle enables it for compilation of the tensor module; no
+`--enable-preview` flag is needed. Direct `javac` builds of that module must also
+supply `--add-modules jdk.incubator.vector`.
+
+Vector kernels cover contiguous same-shape add/subtract/multiply/divide, scalar
+arithmetic in either operand order, contiguous 2D matrices with a 1D right-hand
+bias, ReLU, and 2D matmul when right-hand rows are contiguous. Matmul supports
+strided/transposed left operands and offset views. Kernels use the CPU's preferred
+vector width with scalar tails. Other layouts and operations, including transposed
+right-hand matmul, batched matmul, reductions, arbitrary `map` callbacks, and
+transcendental functions, retain the Java implementation. Copies use `System.arraycopy`.
+Matmul preserves the reduction order and uses separate multiply/add operations,
+not fused multiply-add. No speedup is guaranteed; benchmark your workload.
+
+`./gradlew build` runs the default Vector suite and `javaTest` in separate JVMs.
+With `-PtensorBackend=java`, it runs the Java suite and `vectorTest` instead.
+Tests include backend parity, tail lengths, views, empty tensors, NaNs/infinities,
+and standalone JVM checks for module availability. Run `./gradlew vectorTest` for
+only the Vector backend suites, or `./gradlew javaTest` for pure Java.
+
 For much larger matrix workloads, a native BLAS backend through the
 [Foreign Function & Memory API](https://docs.oracle.com/en/java/javase/26/docs/api/java.base/java/lang/foreign/package-summary.html)
-is another option, at the cost of a native dependency and data-transfer/lifetime management.
-Neither backend is implemented here; measure representative training before choosing one.
+is another option, at the cost of a native dependency and memory management.
+A native backend is not implemented here.
 
 Remaining boundaries: mixed vector/matrix matmul supports forward execution but not
 autograd; cross entropy currently smooths softmax probabilities rather than using a

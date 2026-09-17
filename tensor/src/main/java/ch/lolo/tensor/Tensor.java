@@ -2,13 +2,52 @@ package ch.lolo.tensor;
 
 import java.util.Arrays;
 import java.util.Random;
-import java.util.function.DoubleBinaryOperator;
 import java.util.function.DoubleUnaryOperator;
 
 /**
  * Pure-Java arbitrary-rank double tensor. Slice/transpose are mutable shared views.
  */
 public final class Tensor {
+    private static volatile TensorBackend backend = initialBackend();
+
+    private static TensorBackend initialBackend() {
+        String name = System.getProperty("tensor.backend", "vector");
+        TensorBackend selected;
+        try {
+            selected = TensorBackend.valueOf(name.toUpperCase(java.util.Locale.ROOT));
+        } catch (IllegalArgumentException e) {
+            throw new IllegalArgumentException("tensor.backend must be java or vector: " + name, e);
+        }
+        checkBackend(selected);
+        return selected;
+    }
+
+    private static void checkBackend(TensorBackend selected) {
+        java.util.Objects.requireNonNull(selected, "backend");
+        if (selected == TensorBackend.VECTOR && !isVectorAvailable())
+            throw new IllegalStateException("VECTOR requires JVM option --add-modules jdk.incubator.vector");
+    }
+
+    /** Whether the Vector API module is resolved in this JVM; not a speed guarantee. */
+    public static boolean isVectorAvailable() {
+        return ModuleLayer.boot().findModule("jdk.incubator.vector").isPresent();
+    }
+
+    /** Current process-wide backend; defaults to VECTOR, overridable by -Dtensor.backend=java|vector. */
+    public static TensorBackend backend() {
+        return backend;
+    }
+
+    /**
+     * Selects the backend for subsequent operations, including existing tensors and models.
+     * Configure before training; do not switch while other threads are computing.
+     * VECTOR requires --add-modules jdk.incubator.vector at JVM startup.
+     */
+    public static void setBackend(TensorBackend selected) {
+        checkBackend(selected);
+        backend = selected;
+    }
+
     private final double[] data;
     private final int[] shape, strides;
     private final int offset;
@@ -248,14 +287,24 @@ public final class Tensor {
         return address;
     }
 
-    private Tensor bin(Tensor b, DoubleBinaryOperator f) {
+    private Tensor bin(Tensor b, BinaryOp f) {
         int[] s = TensorShape.broadcast(shape, b.shape);
-        if (b.isScalar()) return map(x -> f.applyAsDouble(x, b.scalar()));
-        if (isScalar()) return b.map(x -> f.applyAsDouble(scalar(), x));
+        if (b.isScalar()) return scalarOp(b.scalar(), f, false);
+        if (isScalar()) return b.scalarOp(scalar(), f, true);
         Tensor t = alloc(s);
+        boolean vector = backend == TensorBackend.VECTOR;
         if (Arrays.equals(shape, b.shape) && isContiguous() && b.isContiguous()) {
+            if (vector) {
+                VectorKernels.binary(data, offset, b.data, b.offset, t.data, 0, t.data.length, f);
+                return t;
+            }
             for (int i = 0; i < t.data.length; i++)
                 t.data[i] = f.applyAsDouble(data[offset + i], b.data[b.offset + i]);
+        } else if (vector && rank() == 2 && b.rank() == 1 && b.shape[0] == shape[1]
+                && isContiguous() && b.isContiguous()) {
+            for (int row = 0; row < shape[0]; row++)
+                VectorKernels.binary(data, offset + row * shape[1], b.data, b.offset,
+                        t.data, row * shape[1], shape[1], f);
         } else {
             int[] index = new int[s.length];
             for (int i = 0; i < t.data.length; i++) {
@@ -269,36 +318,45 @@ public final class Tensor {
         return t;
     }
 
+    private Tensor scalarOp(double scalar, BinaryOp op, boolean scalarFirst) {
+        if (backend == TensorBackend.VECTOR && isContiguous()) {
+            Tensor out = alloc(shape);
+            VectorKernels.scalar(data, offset, scalar, scalarFirst, out.data, op);
+            return out;
+        }
+        return map(v -> scalarFirst ? op.applyAsDouble(scalar, v) : op.applyAsDouble(v, scalar));
+    }
+
     public Tensor add(Tensor b) {
-        return bin(b, (x, y) -> x + y);
+        return bin(b, BinaryOp.ADD);
     }
 
     public Tensor subtract(Tensor b) {
-        return bin(b, (x, y) -> x - y);
+        return bin(b, BinaryOp.SUBTRACT);
     }
 
     public Tensor multiply(Tensor b) {
-        return bin(b, (x, y) -> x * y);
+        return bin(b, BinaryOp.MULTIPLY);
     }
 
     public Tensor divide(Tensor b) {
-        return bin(b, (x, y) -> x / y);
+        return bin(b, BinaryOp.DIVIDE);
     }
 
     public Tensor add(double x) {
-        return map(v -> v + x);
+        return scalarOp(x, BinaryOp.ADD, false);
     }
 
     public Tensor subtract(double x) {
-        return map(v -> v - x);
+        return scalarOp(x, BinaryOp.SUBTRACT, false);
     }
 
     public Tensor multiply(double x) {
-        return map(v -> v * x);
+        return scalarOp(x, BinaryOp.MULTIPLY, false);
     }
 
     public Tensor divide(double x) {
-        return map(v -> v / x);
+        return scalarOp(x, BinaryOp.DIVIDE, false);
     }
 
     public Tensor negate() {
@@ -310,6 +368,11 @@ public final class Tensor {
     }
 
     public Tensor relu() {
+        if (backend == TensorBackend.VECTOR && isContiguous()) {
+            Tensor out = alloc(shape);
+            VectorKernels.relu(data, offset, out.data);
+            return out;
+        }
         return map(v -> Math.max(0, v));
     }
 
@@ -348,6 +411,11 @@ public final class Tensor {
     // Direct stride arithmetic also supports transposed and sliced views used in backpropagation.
     private Tensor matmul2d(Tensor b, int m, int k, int n) {
         Tensor out = alloc(m, n);
+        if (backend == TensorBackend.VECTOR && b.strides[1] == 1) {
+            VectorKernels.matmul(data, offset, strides[0], strides[1], b.data, b.offset,
+                    b.strides[0], out.data, m, k, n);
+            return out;
+        }
         for (int row = 0; row < m; row++) {
             int left = offset + row * strides[0];
             int output = row * n;
