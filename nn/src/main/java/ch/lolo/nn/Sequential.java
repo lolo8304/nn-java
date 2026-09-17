@@ -111,11 +111,25 @@ public final class Sequential {
     public TrainingHistory fitWithValidation(Dataset data, int epochs, int batchSize, boolean shuffle,
                                              double validationFraction, long splitSeed,
                                              Path bestModelPath, int patience) throws IOException {
+        return fitWithValidation(data, epochs, batchSize, shuffle, validationFraction, splitSeed,
+                bestModelPath, patience, java.util.function.UnaryOperator.identity());
+    }
+
+    /**
+     * Applies trainingTransform once, after splitting, to the training subset only.
+     * Use a dataset view that generates fresh augmentation on get(); validation stays untouched.
+     */
+    public TrainingHistory fitWithValidation(Dataset data, int epochs, int batchSize, boolean shuffle,
+                                             double validationFraction, long splitSeed,
+                                             Path bestModelPath, int patience,
+                                             java.util.function.UnaryOperator<Dataset> trainingTransform) throws IOException {
         checkTraining(epochs, batchSize);
         if (patience < 0) throw new IllegalArgumentException("Patience must be nonnegative");
         java.util.Objects.requireNonNull(bestModelPath, "bestModelPath");
         var split = data.splitTraining(validationFraction, splitSeed);
-        var train = split[0];
+        var train = java.util.Objects.requireNonNull(trainingTransform, "trainingTransform").apply(split[0]);
+        if (train == null || train.size() != split[0].size())
+            throw new IllegalArgumentException("Training transform must preserve sample count");
         var validation = split[1];
         System.out.printf("Training samples: %d; validation samples: %d%n", train.size(), validation.size());
         var history = new TrainingHistory();

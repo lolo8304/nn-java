@@ -7,7 +7,7 @@ import java.util.IdentityHashMap;
 import java.util.List;
 
 public final class Adam implements Optimizer {
-    private final double lr, b1, b2, eps;
+    private double lr, b1, b2, eps;
     private final IdentityHashMap<Parameter, Tensor> m = new IdentityHashMap<>(), v = new IdentityHashMap<>();
     private int t;
 
@@ -82,11 +82,13 @@ public final class Adam implements Optimizer {
     }
 
     public void readState(java.io.DataInput in, List<Parameter> ps) throws java.io.IOException {
-        in.readDouble();
-        in.readDouble();
-        in.readDouble();
-        in.readDouble();
+        lr = in.readDouble();
+        b1 = in.readDouble();
+        b2 = in.readDouble();
+        eps = in.readDouble();
         t = in.readInt();
+        m.clear();
+        v.clear();
         for (Parameter p : ps) {
             m.put(p, readTensor(in));
             v.put(p, readTensor(in));

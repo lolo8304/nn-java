@@ -7,7 +7,7 @@ import java.util.IdentityHashMap;
 import java.util.List;
 
 public final class SGD implements Optimizer {
-    private final double lr, momentum;
+    private double lr, momentum;
     private final IdentityHashMap<Parameter, Tensor> velocity = new IdentityHashMap<>();
 
     public SGD(double lr) {
@@ -63,8 +63,9 @@ public final class SGD implements Optimizer {
     }
 
     public void readState(java.io.DataInput in, List<Parameter> ps) throws java.io.IOException {
-        in.readDouble();
-        in.readDouble();
+        lr = in.readDouble();
+        momentum = in.readDouble();
+        velocity.clear();
         for (Parameter p : ps) velocity.put(p, readTensor(in));
     }
 }

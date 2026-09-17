@@ -16,6 +16,26 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class ValidationTrainingTest {
     @Test
+    void trainingTransformIsAppliedOnceAfterSplitAndNeverToValidation(@TempDir Path directory) throws Exception {
+        var source = new TensorDataset(Tensor.ones(20, 2), Tensor.generate(i -> i[1] == 0 ? 1 : 0, 20, 2));
+        var model = Sequential.of(new Dense(2, 2)).compile(new Adam(.001), new CrossEntropyLoss());
+        int[] calls = {0, 0};
+        model.fitWithValidation(source, 2, 8, false, .2, 42, directory.resolve("best.nn"), 0, train -> {
+            calls[0]++;
+            assertEquals(16, train.size());
+            return new ch.lolo.nn.data.Dataset() {
+                public int size() { return train.size(); }
+                public ch.lolo.nn.data.Sample get(int index) {
+                    calls[1]++;
+                    return train.get(index);
+                }
+            };
+        });
+        assertEquals(1, calls[0]);
+        assertEquals(32, calls[1]); // Two epochs of 16 training samples; validation reads never hit this wrapper.
+    }
+
+    @Test
     void earlyStoppingStopsAfterPatienceAndRetainsBestCheckpoint(@TempDir Path directory) throws Exception {
         var data = new TensorDataset(Tensor.ones(20, 2), Tensor.generate(i -> i[1] == 0 ? 1 : 0, 20, 2));
         var model = Sequential.of(new Dense(2, 2)).compile(new ch.lolo.nn.optim.SGD(0), new CrossEntropyLoss());
