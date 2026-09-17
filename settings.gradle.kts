@@ -1,2 +1,2 @@
 rootProject.name = "java-nn"
-include("tensor", "nn", "examples")
+include("tensor", "nn", "examples", "benchmarks")

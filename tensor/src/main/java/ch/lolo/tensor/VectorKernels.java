@@ -30,22 +30,22 @@ final class VectorKernels {
     }
 
     static void scalar(double[] a, int offset, double value, boolean scalarFirst,
-                       double[] out, BinaryOp op) {
-        int i = 0, bound = SPECIES.loopBound(out.length);
+                       double[] out, int outputOffset, int length, BinaryOp op) {
+        int i = 0, bound = SPECIES.loopBound(length);
         var scalar = DoubleVector.broadcast(SPECIES, value);
         for (; i < bound; i += SPECIES.length()) {
             var av = DoubleVector.fromArray(SPECIES, a, offset + i);
-            (scalarFirst ? apply(op, scalar, av) : apply(op, av, scalar)).intoArray(out, i);
+            (scalarFirst ? apply(op, scalar, av) : apply(op, av, scalar)).intoArray(out, outputOffset + i);
         }
-        for (; i < out.length; i++)
-            out[i] = scalarFirst ? op.applyAsDouble(value, a[offset + i]) : op.applyAsDouble(a[offset + i], value);
+        for (; i < length; i++)
+            out[outputOffset + i] = scalarFirst ? op.applyAsDouble(value, a[offset + i]) : op.applyAsDouble(a[offset + i], value);
     }
 
-    static void relu(double[] a, int offset, double[] out) {
-        int i = 0, bound = SPECIES.loopBound(out.length);
+    static void relu(double[] a, int offset, double[] out, int outputOffset, int length) {
+        int i = 0, bound = SPECIES.loopBound(length);
         for (; i < bound; i += SPECIES.length())
-            DoubleVector.fromArray(SPECIES, a, offset + i).max(0.0).intoArray(out, i);
-        for (; i < out.length; i++) out[i] = Math.max(0.0, a[offset + i]);
+            DoubleVector.fromArray(SPECIES, a, offset + i).max(0.0).intoArray(out, outputOffset + i);
+        for (; i < length; i++) out[outputOffset + i] = Math.max(0.0, a[offset + i]);
     }
 
     // SIMD across columns, preserving each element's reduction order and avoiding FMA.

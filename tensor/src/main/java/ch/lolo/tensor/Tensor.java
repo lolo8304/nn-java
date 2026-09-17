@@ -287,45 +287,143 @@ public final class Tensor {
         return address;
     }
 
-    private Tensor bin(Tensor b, BinaryOp f) {
-        int[] s = TensorShape.broadcast(shape, b.shape);
-        if (b.isScalar()) return scalarOp(b.scalar(), f, false);
-        if (isScalar()) return b.scalarOp(scalar(), f, true);
-        Tensor t = alloc(s);
-        boolean vector = backend == TensorBackend.VECTOR;
-        if (Arrays.equals(shape, b.shape) && isContiguous() && b.isContiguous()) {
-            if (vector) {
-                VectorKernels.binary(data, offset, b.data, b.offset, t.data, 0, t.data.length, f);
-                return t;
-            }
-            for (int i = 0; i < t.data.length; i++)
-                t.data[i] = f.applyAsDouble(data[offset + i], b.data[b.offset + i]);
-        } else if (vector && rank() == 2 && b.rank() == 1 && b.shape[0] == shape[1]
-                && isContiguous() && b.isContiguous()) {
-            for (int row = 0; row < shape[0]; row++)
-                VectorKernels.binary(data, offset + row * shape[1], b.data, b.offset,
-                        t.data, row * shape[1], shape[1], f);
+    /**
+     * Copies into an existing tensor of exactly the same shape and returns destination.
+     * Shared views are supported: results are as if all inputs were read before any writes.
+     * Noncontiguous overlapping layouts may require an input snapshot.
+     */
+    public Tensor copyInto(Tensor destination) {
+        requireShape(destination, shape);
+        if (sameLayout(destination)) return destination;
+        if (isContiguous() && destination.isContiguous()) {
+            System.arraycopy(data, offset, destination.data, destination.offset, (int) size());
         } else {
-            int[] index = new int[s.length];
-            for (int i = 0; i < t.data.length; i++) {
-                t.data[i] = f.applyAsDouble(data[broadcastAddress(index)], b.data[b.broadcastAddress(index)]);
-                for (int a = s.length - 1; a >= 0; a--) {
-                    if (++index[a] < s[a]) break;
-                    index[a] = 0;
-                }
+            Tensor source = safeInput(destination);
+            int[] index = new int[rank()];
+            for (int i = 0, length = (int) size(); i < length; i++) {
+                destination.data[destination.broadcastAddress(index)] = source.data[source.broadcastAddress(index)];
+                advance(index, shape);
             }
         }
-        return t;
+        return destination;
+    }
+
+    private static void requireShape(Tensor destination, int[] expected) {
+        java.util.Objects.requireNonNull(destination, "destination");
+        if (!Arrays.equals(destination.shape, expected))
+            throw new IllegalArgumentException("destination shape must be " + Arrays.toString(expected));
+    }
+
+    private boolean sameLayout(Tensor other) {
+        return data == other.data && offset == other.offset
+                && Arrays.equals(shape, other.shape) && Arrays.equals(strides, other.strides);
+    }
+
+    private long lastAddress() {
+        long last = offset;
+        for (int a = 0; a < rank(); a++) last += (long) (shape[a] - 1) * strides[a];
+        return last;
+    }
+
+    // All current views have nonnegative strides. Bounding intervals may conservatively
+    // overlap for interleaved slices; copying in that case is safe, though unnecessary.
+    private Tensor safeInput(Tensor destination) {
+        if (data != destination.data || sameLayout(destination) || size() == 0 || destination.size() == 0)
+            return this;
+        return offset <= destination.lastAddress() && destination.offset <= lastAddress() ? copy() : this;
+    }
+
+    private static void advance(int[] index, int[] dimensions) {
+        for (int a = dimensions.length - 1; a >= 0; a--) {
+            if (++index[a] < dimensions[a]) break;
+            index[a] = 0;
+        }
+    }
+
+    private Tensor bin(Tensor b, BinaryOp op) {
+        return binaryInto(b, alloc(TensorShape.broadcast(shape, b.shape)), op);
+    }
+
+    private Tensor binaryInto(Tensor b, Tensor destination, BinaryOp op) {
+        int[] resultShape = TensorShape.broadcast(shape, b.shape);
+        requireShape(destination, resultShape); // Validate before mutating any shared storage.
+        Tensor left = safeInput(destination), right = b.safeInput(destination);
+        if (right.isScalar()) return left.scalarInto(right.scalar(), destination, op, false);
+        if (left.isScalar()) return right.scalarInto(left.scalar(), destination, op, true);
+        int length = (int) destination.size();
+        boolean vector = backend == TensorBackend.VECTOR;
+        if (Arrays.equals(left.shape, right.shape) && left.isContiguous()
+                && right.isContiguous() && destination.isContiguous()) {
+            if (vector) {
+                VectorKernels.binary(left.data, left.offset, right.data, right.offset,
+                        destination.data, destination.offset, length, op);
+            } else {
+                for (int i = 0; i < length; i++) destination.data[destination.offset + i] =
+                        op.applyAsDouble(left.data[left.offset + i], right.data[right.offset + i]);
+            }
+        } else if (vector && left.rank() == 2 && right.rank() == 1 && right.shape[0] == left.shape[1]
+                && left.isContiguous() && right.isContiguous() && destination.isContiguous()) {
+            for (int row = 0; row < left.shape[0]; row++)
+                VectorKernels.binary(left.data, left.offset + row * left.shape[1], right.data, right.offset,
+                        destination.data, destination.offset + row * left.shape[1], left.shape[1], op);
+        } else {
+            int[] index = new int[resultShape.length];
+            for (int i = 0; i < length; i++) {
+                destination.data[destination.broadcastAddress(index)] = op.applyAsDouble(
+                        left.data[left.broadcastAddress(index)], right.data[right.broadcastAddress(index)]);
+                advance(index, resultShape);
+            }
+        }
+        return destination;
     }
 
     private Tensor scalarOp(double scalar, BinaryOp op, boolean scalarFirst) {
-        if (backend == TensorBackend.VECTOR && isContiguous()) {
-            Tensor out = alloc(shape);
-            VectorKernels.scalar(data, offset, scalar, scalarFirst, out.data, op);
-            return out;
-        }
-        return map(v -> scalarFirst ? op.applyAsDouble(scalar, v) : op.applyAsDouble(v, scalar));
+        return scalarInto(scalar, alloc(shape), op, scalarFirst);
     }
+
+    private Tensor scalarInto(double scalar, Tensor destination, BinaryOp op, boolean scalarFirst) {
+        requireShape(destination, shape);
+        Tensor source = safeInput(destination);
+        int length = (int) size();
+        if (source.isContiguous() && destination.isContiguous()) {
+            if (backend == TensorBackend.VECTOR) {
+                VectorKernels.scalar(source.data, source.offset, scalar, scalarFirst,
+                        destination.data, destination.offset, length, op);
+            } else {
+                for (int i = 0; i < length; i++) {
+                    double value = source.data[source.offset + i];
+                    destination.data[destination.offset + i] = scalarFirst
+                            ? op.applyAsDouble(scalar, value) : op.applyAsDouble(value, scalar);
+                }
+            }
+        } else {
+            int[] index = new int[rank()];
+            for (int i = 0; i < length; i++) {
+                double value = source.data[source.broadcastAddress(index)];
+                destination.data[destination.broadcastAddress(index)] = scalarFirst
+                        ? op.applyAsDouble(scalar, value) : op.applyAsDouble(value, scalar);
+                advance(index, shape);
+            }
+        }
+        return destination;
+    }
+
+    /** Broadcasts this + b into destination; shared views have snapshot semantics. */
+    public Tensor addInto(Tensor b, Tensor destination) { return binaryInto(b, destination, BinaryOp.ADD); }
+    /** Broadcasts this - b into destination; destination must have the exact result shape. */
+    public Tensor subtractInto(Tensor b, Tensor destination) { return binaryInto(b, destination, BinaryOp.SUBTRACT); }
+    /** Broadcasts this * b into destination; shared views have snapshot semantics. */
+    public Tensor multiplyInto(Tensor b, Tensor destination) { return binaryInto(b, destination, BinaryOp.MULTIPLY); }
+    /** Broadcasts this / b into destination; shared views have snapshot semantics. */
+    public Tensor divideInto(Tensor b, Tensor destination) { return binaryInto(b, destination, BinaryOp.DIVIDE); }
+    /** Writes this + scalar into a same-shaped destination. */
+    public Tensor addInto(double scalar, Tensor destination) { return scalarInto(scalar, destination, BinaryOp.ADD, false); }
+    /** Writes this - scalar into a same-shaped destination. */
+    public Tensor subtractInto(double scalar, Tensor destination) { return scalarInto(scalar, destination, BinaryOp.SUBTRACT, false); }
+    /** Writes this * scalar into a same-shaped destination. */
+    public Tensor multiplyInto(double scalar, Tensor destination) { return scalarInto(scalar, destination, BinaryOp.MULTIPLY, false); }
+    /** Writes this / scalar into a same-shaped destination. */
+    public Tensor divideInto(double scalar, Tensor destination) { return scalarInto(scalar, destination, BinaryOp.DIVIDE, false); }
 
     public Tensor add(Tensor b) {
         return bin(b, BinaryOp.ADD);
@@ -368,12 +466,27 @@ public final class Tensor {
     }
 
     public Tensor relu() {
-        if (backend == TensorBackend.VECTOR && isContiguous()) {
-            Tensor out = alloc(shape);
-            VectorKernels.relu(data, offset, out.data);
-            return out;
+        return reluInto(alloc(shape));
+    }
+
+    /** Writes ReLU into a same-shaped destination, with snapshot semantics for shared views. */
+    public Tensor reluInto(Tensor destination) {
+        requireShape(destination, shape);
+        Tensor source = safeInput(destination);
+        int length = (int) size();
+        if (source.isContiguous() && destination.isContiguous()) {
+            if (backend == TensorBackend.VECTOR)
+                VectorKernels.relu(source.data, source.offset, destination.data, destination.offset, length);
+            else for (int i = 0; i < length; i++)
+                destination.data[destination.offset + i] = Math.max(0, source.data[source.offset + i]);
+        } else {
+            int[] index = new int[rank()];
+            for (int i = 0; i < length; i++) {
+                destination.data[destination.broadcastAddress(index)] = Math.max(0, source.data[source.broadcastAddress(index)]);
+                advance(index, shape);
+            }
         }
-        return map(v -> Math.max(0, v));
+        return destination;
     }
 
     public Tensor sigmoid() {

@@ -7,14 +7,19 @@ and inference workloads before accepting a performance change.
 
 ## First: reliable measurements
 
-- [ ] **Add JMH benchmarks with multiple forks and sufficient warmup.** Measure small,
+- [x] **Add JMH benchmarks with multiple forks and sufficient warmup.** Measure small,
   medium, and MNIST-sized tensors, vector tails, contiguous/strided inputs, both
   matmul transposes, allocation rate, and GC time. The current 100-operation warmup
   produces variable dense Vector allocations.
-- [ ] **Add repeatable end-to-end benchmarks.** Measure samples/second, epoch time,
+- [x] **Add repeatable end-to-end benchmarks.** Measure samples/second, epoch time,
   inference latency, and peak memory on fixed datasets/seeds. Separate data loading,
   augmentation, forward, backward, optimizer, and checkpoint time. Profile before
   choosing the next kernel to optimize. Do not use test accuracy to tune performance.
+
+Implemented measurement foundation: `benchmarks` now supplies forked JMH kernel and
+complete synthetic-epoch workloads, allocation/GC profiling, repeated phase profiles,
+and optional JFR recording. Real MNIST augmentation/checkpoint profiles and exact
+peak-live-memory measurement remain follow-up work; see [the guide](benchmarks/GUIDE.md).
 
 ## Tensor priorities
 
@@ -22,7 +27,7 @@ and inference workloads before accepting a performance change.
 |---|---|---|---|
 | High | Vector matmul with a transposed right operand | `g.matmul(weights.transpose())` uses the scalar fallback in input-gradient computation. Evaluate packed panels or a dedicated transpose-aware kernel. | Benchmark packing overhead and small shapes; verify offset/stride handling. Avoid stale packed weights after optimizer updates. |
 | High | Cache-blocked matmul | The current kernel repeatedly streams right-hand rows and output data. Tile larger products to improve cache reuse. | Tune against representative shapes and CPU caches; retain a small-matrix path. Preserve reduction order unless explicitly accepting rounding changes. |
-| High | Destination-buffer operations | Arithmetic creates a new tensor for each operation. Add internal `addInto`, `multiplyInto`, `axpy`, and copy-to kernels to support optimizer and gradient reuse. | Define ownership and aliasing rules first: slices/transposes share storage. Reject or safely handle overlapping operands. |
+| Foundation implemented | Destination-buffer operations | Public arithmetic/scalar `*Into`, `copyInto`, and `reluInto` now reuse destinations. Fused `axpy`, optimizer integration, and gradient reuse remain future work. | Snapshot semantics protect overlapping views; exact-layout updates and independent destinations avoid full-sized scratch buffers. |
 | Medium | Faster reductions | `sum`, axis reductions, min/max, and softmax row reductions still use Java loops or indexed iteration. Add specialized contiguous kernels and evaluate SIMD. | Vector sums change addition order. Test cancellation, extreme magnitudes, NaNs, infinities, signed zero, and empty tensors; use documented tolerances. |
 | Medium | Extend broadcast SIMD coverage | The explicit Vector broadcast path handles a contiguous 2D matrix and 1D right operand. Add common singleton-axis and higher-rank cases. | Avoid copying whole broadcast operands; compare setup overhead on small tensors. Preserve operand order for subtraction/division. |
 | Medium | Faster noncontiguous traversal | Generic map/copy/extrema and some fallbacks still allocate index arrays. Use internal stride cursors and direct offsets. | Keep public generator callback semantics unchanged; validate arbitrary rank, singleton axes, offsets, and empty shapes. |

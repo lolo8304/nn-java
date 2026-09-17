@@ -1,5 +1,12 @@
 # Local kernel comparison
 
+See [reusable output buffer results](OUTPUT_BUFFER_RESULTS.md) for the latest
+forked JMH measurements.
+
+For the new forked JMH benchmarks and training phase profiler, see the
+[benchmark guide](GUIDE.md). The tables below are historical smoke-harness results
+from before reusable output buffers; they are not JMH measurements.
+
 ## Current Java 26 backend measurements
 
 Recorded on 2026-09-17. Local environment: Apple M4 Pro (arm64), OpenJDK 26.0.2,

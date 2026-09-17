@@ -188,20 +188,57 @@ Softmax backward uses `y * (g - sum(g * y))`, linear in the number of classes.
 Backpropagation skips derivatives for constant operands, and optimizers allocate
 initial moment/velocity tensors only when first needed.
 
-Run the local timing/allocation comparison harness on Java 26:
+Run the repeated JMH benchmarks and complete training profile on Java 26:
 
 ```bash
-./gradlew :examples:runKernelBenchmark
+./gradlew :benchmarks:kernel
+./gradlew :benchmarks:training
+./gradlew :benchmarks:profile
 ```
+
+Append `-PtensorBackend=java` for the Java backend. See the
+[benchmark guide](benchmarks/GUIDE.md) for warmup, forks, workload filters,
+JSON results, phase allocation/time reports, and JFR recordings.
+`:examples:runKernelBenchmark` remains the short legacy smoke harness.
 
 Install JDK 26 before building. The shared Gradle toolchain selects Java 26 for
 compilation, tests, and all example/benchmark run tasks, even when the shell's
 `java` command points to an older JDK. The benchmark uses a 256–512 MiB heap.
 
-This short harness is for local comparisons; use JMH with multiple forks for reliable
-performance decisions. See [latest Java/Vector benchmark results](benchmarks/README.md#current-java-26-backend-measurements)
+The JMH tasks use two forks, time-based warmup, repeated measurements, and GC profiling.
+Historical smoke-harness results are not directly comparable to these measurements. See [latest Java/Vector benchmark results](benchmarks/README.md#current-java-26-backend-measurements)
 for timings, allocation counts, the user-reported comparison, and the subsequent
 default-Vector verification run.
+
+### Reusable tensor output buffers
+
+Arithmetic, scalar arithmetic, copying and ReLU can write into an existing tensor:
+
+```java
+Tensor out = Tensor.zeros(x.shape());
+x.multiplyInto(y, out);
+out.addInto(bias, out);
+out.reluInto(out);
+x.copyInto(out);
+```
+
+`addInto`, `subtractInto`, `multiplyInto`, and `divideInto` accept either a tensor
+(with ordinary broadcasting) or a scalar, followed by the destination. Every method
+returns that destination; its shape must exactly match the result. Existing
+allocating methods keep returning independent storage.
+
+In-place updates, offset views and noncontiguous destinations are supported.
+Inputs have snapshot semantics: a differently mapped overlapping input is copied
+before any writes; contiguous `copyInto` uses overlap-safe `System.arraycopy`.
+Separate storage and exact-layout in-place updates avoid full-sized temporary
+buffers, though small shape/index allocations may remain. Conservative overlap
+detection can copy interleaved views even when their individual elements are disjoint.
+Shape errors are rejected before destination writes.
+
+These are explicitly mutating operations: do not overwrite tensors that a live
+autograd graph still needs for backward. Optimizer fusion and automatic gradient
+buffer reuse remain separate future changes. Matmul destination buffers are not
+part of this initial API.
 
 ### Global execution backend
 
